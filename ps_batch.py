@@ -60,7 +60,12 @@ def process_color(ps, folder, color, action_name, output_name):
         log(f"  跳过{color}T：{output_name}已存在")
         return False
 
-    log(f"  正背两张同时打开...")
+    log(f"  清理旧标签 + 打开正背两张...")
+    try:
+        ps_clean = get_ps()
+        close_all_docs(ps_clean)
+    except:
+        pass  # PS 可能还没启动
     ps_open_both(back_img, front_img)
     ps = wait_ps_docs(2)
     log(f"  已打开 {ps.Documents.Count} 个文档")

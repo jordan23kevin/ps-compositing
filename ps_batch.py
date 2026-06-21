@@ -1,6 +1,7 @@
-# ===== PS 正反图批处理 v1.0 =====
+# ===== PS 正反图批处理 v1.1.0 =====
 # 更新日期: 2026-06-21
 # 核心功能: 遍历 DX 文件夹，正反图合成白BW/黑BW
+# 关键优化: 一次打开两张图 + Export保存不弹窗 + 开图前清空标签
 # =========================================
 import io, win32com.client, os, time, sys
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')

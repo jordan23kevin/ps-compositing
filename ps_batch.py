@@ -14,7 +14,8 @@ def log(msg):
 def ps_open_both(back_img, front_img):
     """一次性打开正背两张图（PS命令行支持多文件）"""
     shell = win32com.client.Dispatch('WScript.Shell')
-    shell.Run(f'"{PS_EXE}" "{back_img}" "{front_img}"', 1, False)
+    # PS 最后打开的文件会成为活动文档，所以正先打开、背后打开 → 背自动激活
+    shell.Run(f'"{PS_EXE}" "{front_img}" "{back_img}"', 1, False)
 
 def wait_ps_docs(target_count=2, timeout=20):
     """轮询等待 PS 打开指定数量的文档"""

@@ -101,12 +101,22 @@ def process_color(ps, folder, color, action_name, output_name):
 
 
 def main():
+    import sys as _sys
+    start_from = None
+    for a in _sys.argv[1:]:
+        if a.startswith('DX'):
+            start_from = a
+    if start_from:
+        log(f"起始文件夹: {start_from}")
+
     log(f"扫描: {SRC}")
     folders = sorted([d for d in os.listdir(SRC)
                       if os.path.isdir(os.path.join(SRC, d)) and d.startswith('DX')])
-    log(f"发现 {len(folders)} 个 DX 文件夹")
+    if start_from and start_from in folders:
+        folders = folders[folders.index(start_from):]
+    log(f"发现 {len(folders)} 个 DX 文件夹" + (f"（从{start_from}开始）" if start_from else ""))
 
-    results = {"白T": 0, "黑T": 0, "跳过白": 0, "跳过黑": 0, "失败": 0}
+    results = {"白T": 0, "黑T": 0, "跳过白": 0, "跳过黑": 0, "失败黑": []}
 
     for folder_name in folders:
         folder_path = os.path.join(SRC, folder_name)
@@ -120,17 +130,30 @@ def main():
         else:
             results["跳过白"] += 1
 
-        # 黑T
-        ps = get_ps()
-        if process_color(ps, folder_path, "黑", "黑", "黑BW.jpg"):
-            results["黑T"] += 1
-        else:
-            results["跳过黑"] += 1
+        # 黑T（加异常保护，失败则记录跳过下一张）
+        try:
+            ps = get_ps()
+            if process_color(ps, folder_path, "黑", "黑", "黑BW.jpg"):
+                results["黑T"] += 1
+            else:
+                results["跳过黑"] += 1
+        except Exception as e:
+            log(f"  ⚠️ 黑T异常: {e}")
+            results["失败黑"].append(folder_name)
+            # 尝试关闭所有文档恢复PS状态
+            try:
+                ps = get_ps()
+                close_all_docs(ps)
+            except:
+                pass
+            continue
 
     log(f"\n{'='*50}")
     log(f"全部完成！")
     log(f"  白T生成: {results['白T']}  跳过: {results['跳过白']}")
     log(f"  黑T生成: {results['黑T']}  跳过: {results['跳过黑']}")
+    if results["失败黑"]:
+        log(f"  黑T异常需重试: {', '.join(results['失败黑'])}")
     log(f"{'='*50}")
 
 

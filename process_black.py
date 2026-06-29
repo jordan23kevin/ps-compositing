@@ -8,7 +8,6 @@ ALPHA_THRESHOLD = 20
 BASE = Path(r"D:\Semems WB\02_PROJECTS")
 TORSO = Path(r"D:\Semems\1胚衣")
 
-
 BACK_NEW = {
     "torso_white": "白背2.jpg", "torso_black": "黑背2.jpg",
     "scale_percent": 30, "rotation": 1,
@@ -21,7 +20,7 @@ FRONT_NEW = {
 }
 
 
-def place_one(side, cfg, inv_path, dx, upload):
+def place_one(side, cfg, inv_path, dx, upload, torso_color="black"):
     """PS贴图：trim+缩放+贴到胚衣+保存"""
     import win32com.client, pythoncom
     pythoncom.CoInitialize()
@@ -29,7 +28,7 @@ def place_one(side, cfg, inv_path, dx, upload):
         psApp = win32com.client.Dispatch("Photoshop.Application")
         psApp.DisplayDialogs = 3
 
-        torso_file = cfg["torso_black"]
+        torso_file = cfg[f"torso_{torso_color}"]
         torso_path = str(TORSO / torso_file)
         scale = cfg["scale_percent"] / 100
 
@@ -40,7 +39,7 @@ def place_one(side, cfg, inv_path, dx, upload):
         mask = alpha >= ALPHA_THRESHOLD
         ys, xs = np.where(mask)
         if len(ys) == 0:
-            return f"⚠️ {inv_path.name} 无有效像素"
+            return None
         x0, x1 = xs.min(), xs.max() + 1
         y0, y1 = ys.min(), ys.max() + 1
         trimmed = img.crop((x0, y0, x1, y1))
@@ -49,17 +48,16 @@ def place_one(side, cfg, inv_path, dx, upload):
         scaled = trimmed.resize((new_w, new_h), Image.LANCZOS)
 
         temp_dir = tempfile.gettempdir()
-        temp_design = os.path.join(temp_dir, f"temp_{dx}_inverted.png")
+        temp_design = os.path.join(temp_dir, f"temp_{dx}_inv.png")
         scaled.save(temp_design, "PNG")
 
-        # 位置计算（trim后顶部=有效像素顶部，直接用target_top_y）
         move_x = cfg["target_center_x"] - new_w / 2
         move_y = cfg["target_top_y"]
 
-        output_name = f"{dx}_{side}_黑T.jpg"
+        color_suffix = "白T" if torso_color == "white" else "黑T"
+        output_name = f"{dx}_{side}_{color_suffix}.jpg"
         output_path = str(upload / output_name)
 
-        # JSX
         jsx_path = os.path.join(os.path.dirname(__file__), "jsx", "place_design.jsx")
         with open(jsx_path, "r", encoding="utf-8") as jf:
             jsx = jf.read()
@@ -70,45 +68,38 @@ def place_one(side, cfg, inv_path, dx, upload):
         jsx = jsx.replace("{{MOVE_X}}", str(move_x))
         jsx = jsx.replace("{{MOVE_Y}}", str(move_y))
 
-        temp_jsx = os.path.join(temp_dir, "temp_black_place.jsx")
+        temp_jsx = os.path.join(temp_dir, "temp_place.jsx")
         with open(temp_jsx, "w", encoding="utf-8") as jf:
             jf.write(jsx)
         psApp.DoJavaScriptFile(temp_jsx)
-        return f"✅ {output_name}"
+        return output_name
     except Exception as e:
-        return f"❌ PS错误: {e}"
+        print(f"  ❌ PS错误({side},{torso_color}): {e}")
+        return None
     finally:
         pythoncom.CoUninitialize()
 
 
 def bw_synth(dx, upload):
-    """BW合成：将B和W合并为BW图"""
+    """BW合成：B_黑T + W_黑T → 黑BW"""
     import win32com.client, pythoncom
     pythoncom.CoInitialize()
     try:
         psApp = win32com.client.Dispatch("Photoshop.Application")
         psApp.DisplayDialogs = 3
-        b_img = str(upload / f"{dx}_B_黑T.jpg")
-        w_img = str(upload / f"{dx}_W_黑T.jpg")
-        out_white = str(upload / f"{dx}_白BW.jpg")
-        out_black = str(upload / f"{dx}_黑BW.jpg")
 
-        def synth_one(output_path):
-            backDoc = psApp.Open(b_img)
-            frontDoc = psApp.Open(w_img)
-            psApp.ActiveDocument = frontDoc
-            frontDoc.ArtLayers.Item(1).Duplicate(backDoc)
-            frontDoc.Close(2)
-            psApp.ActiveDocument = backDoc
-            backDoc.Flatten()
-            jpgOpt = win32com.client.Dispatch("Photoshop.JPEGSaveOptions")
-            jpgOpt.Quality = 12
-            backDoc.SaveAs(output_path, jpgOpt, True, 2)
-            backDoc.Close(2)
-
-        synth_one(out_white)
-        synth_one(out_black)
-        return "✅ 白BW + 黑BW 合成完成"
+        backDoc = psApp.Open(str(upload / f"{dx}_B_黑T.jpg"))
+        frontDoc = psApp.Open(str(upload / f"{dx}_W_黑T.jpg"))
+        psApp.ActiveDocument = frontDoc
+        frontDoc.ArtLayers.Item(1).Duplicate(backDoc)
+        frontDoc.Close(2)
+        psApp.ActiveDocument = backDoc
+        backDoc.Flatten()
+        jpgOpt = win32com.client.Dispatch("Photoshop.JPEGSaveOptions")
+        jpgOpt.Quality = 12
+        backDoc.SaveAs(str(upload / f"{dx}_黑BW.jpg"), jpgOpt, True, 2)
+        backDoc.Close(2)
+        return "✅ 黑BW 合成完成"
     except Exception as e:
         return f"❌ BW合成错误: {e}"
     finally:
@@ -124,6 +115,8 @@ def main():
     t0 = time.time()
     upload = BASE / dx / "03_UPLOAD"
     rembg = BASE / dx / "02_REM_BG"
+
+    # 找黑版文件
     tasks = []
     for inv_path in sorted(rembg.glob(f"{dx}_黑*_cut.png")):
         letter = Path(inv_path).stem.replace(f"{dx}_黑", "").replace("_cut", "")
@@ -134,17 +127,26 @@ def main():
         elif letter == "WB":
             tasks.append(("B", BACK_NEW, inv_path))
             tasks.append(("W", FRONT_NEW, inv_path))
+
     if not tasks:
         print("❌ 未找到黑版_cut文件")
         return
+
+    # 贴图：只做黑色胚衣版本
     print(f"\n--- 贴图 ({len(tasks)}张) ---")
     for side, cfg, inv_path in tasks:
-        print(place_one(side, cfg, inv_path, dx, upload))
+        r = place_one(side, cfg, inv_path, dx, upload, "black")
+        if r: print(f"  ✅ {r}")
+
+    # BW合成
     has_b = any(s == "B" for s, _, _ in tasks)
     has_w = any(s == "W" for s, _, _ in tasks)
     if has_b and has_w:
         print("\n--- BW合成 ---")
-        print(bw_synth(dx, upload))
+        print(f"  {bw_synth(dx, upload)}")
+    else:
+        print("⏭️ 只有单面，跳过BW合成")
+
     dt = time.time() - t0
     print(f"\n⏱️ 总耗时: {dt:.1f}秒")
     print("=" * 40)

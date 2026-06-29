@@ -160,6 +160,9 @@ def process_dx_folder(dx_folder):
         # 只处理 _cut.png 文件，跳过其他（如 DXxxxx_B.png）
         if not file.lower().endswith("_cut.png"):
             continue
+        # 跳过黑版（反相生成的文件，含_黑）
+        if "_黑" in file:
+            continue
 
         print(f"\n处理: {file}")
         design_path = os.path.join(rem_bg_folder, file)

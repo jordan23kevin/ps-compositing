@@ -139,7 +139,7 @@ def main():
             tasks.append(("B", BACK_NEW, inv_path))
         elif letter == "W":
             tasks.append(("W", FRONT_NEW, inv_path))
-        elif letter == "WB":
+        elif letter == "WB" or letter == "BW":
             tasks.append(("B", BACK_NEW, inv_path))
             tasks.append(("W", FRONT_NEW, inv_path))
 

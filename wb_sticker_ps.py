@@ -108,33 +108,40 @@ def process_dx_folder(dx_folder):
         print(f"\n处理: {file}")
         design_path = os.path.join(rem_bg_folder, file)
         design_type = classify_design(file)
-        base_name = os.path.splitext(file)[0]
+        
+        # 提取基础 DX 名称（去掉 _cut.png 等后缀）
+        base_name = dx_name  # 直接用 DXxxxx
 
-        # 构建任务列表（避免BW重复）
-        tasks = []
         if design_type == "BW":
-            # BW: 正+背，白+黑，共4个
-            tasks.append(("white", config.FRONT, True))
-            tasks.append(("black", config.FRONT, True))
-            tasks.append(("white", config.BACK, False))
-            tasks.append(("black", config.BACK, False))
+            # ===== BW 类型：生成 W 和 B 两套文件，供 ps_batch.py 合成 =====
+            # W 套（正面）
+            print("  → 生成 W 正面文件...")
+            place_design(design_path, os.path.join(config.BASE_TORSO, config.FRONT["torso_white"]),
+                         os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"), config.FRONT, is_front=True)
+            place_design(design_path, os.path.join(config.BASE_TORSO, config.FRONT["torso_black"]),
+                         os.path.join(upload_folder, f"{dx_name}_W_黑T.jpg"), config.FRONT, is_front=True)
+            
+            # B 套（背面）
+            print("  → 生成 B 背面文件...")
+            place_design(design_path, os.path.join(config.BASE_TORSO, config.BACK["torso_white"]),
+                         os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"), config.BACK, is_front=False)
+            place_design(design_path, os.path.join(config.BASE_TORSO, config.BACK["torso_black"]),
+                         os.path.join(upload_folder, f"{dx_name}_B_黑T.jpg"), config.BACK, is_front=False)
+            print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
+        
         elif design_type == "W":
-            # W: 只正面，白+黑
-            tasks.append(("white", config.FRONT, True))
-            tasks.append(("black", config.FRONT, True))
+            # ===== W 类型：只生成正面 =====
+            place_design(design_path, os.path.join(config.BASE_TORSO, config.FRONT["torso_white"]),
+                         os.path.join(upload_folder, f"{base_name}_W_白T.jpg"), config.FRONT, is_front=True)
+            place_design(design_path, os.path.join(config.BASE_TORSO, config.FRONT["torso_black"]),
+                         os.path.join(upload_folder, f"{base_name}_W_黑T.jpg"), config.FRONT, is_front=True)
+        
         elif design_type == "B":
-            # B: 只背面，白+黑
-            tasks.append(("white", config.BACK, False))
-            tasks.append(("black", config.BACK, False))
-
-        for color, placement, is_front in tasks:
-            torso_file = placement[f"torso_{color}"]
-            torso_path = os.path.join(config.BASE_TORSO, torso_file)
-            color_name = "白T" if color == "white" else "黑T"
-            output_name = f"{base_name}_{color_name}.jpg"
-            output_path = os.path.join(upload_folder, output_name)
-
-            place_design(design_path, torso_path, output_path, placement, is_front)
+            # ===== B 类型：只生成背面 =====
+            place_design(design_path, os.path.join(config.BASE_TORSO, config.BACK["torso_white"]),
+                         os.path.join(upload_folder, f"{base_name}_B_白T.jpg"), config.BACK, is_front=False)
+            place_design(design_path, os.path.join(config.BASE_TORSO, config.BACK["torso_black"]),
+                         os.path.join(upload_folder, f"{base_name}_B_黑T.jpg"), config.BACK, is_front=False)
 
 
 def main():

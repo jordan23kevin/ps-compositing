@@ -81,24 +81,39 @@ def place_one(side, cfg, inv_path, dx, upload, torso_color="black"):
 
 
 def bw_synth(dx, upload):
-    """BW合成：B_黑T + W_黑T → 黑BW"""
+    """BW合成：用PS动作合并B和W"""
     import win32com.client, pythoncom
     pythoncom.CoInitialize()
     try:
         psApp = win32com.client.Dispatch("Photoshop.Application")
         psApp.DisplayDialogs = 3
+        b_img = str(upload / f"{dx}_B_黑T.jpg")
+        w_img = str(upload / f"{dx}_W_黑T.jpg")
+        out_path = str(upload / f"{dx}_黑BW.jpg")
 
-        backDoc = psApp.Open(str(upload / f"{dx}_B_黑T.jpg"))
-        frontDoc = psApp.Open(str(upload / f"{dx}_W_黑T.jpg"))
-        psApp.ActiveDocument = frontDoc
-        frontDoc.ArtLayers.Item(1).Duplicate(backDoc)
-        frontDoc.Close(2)
-        psApp.ActiveDocument = backDoc
-        backDoc.Flatten()
+        # 用PS动作合成（和ps_batch.py一致）
+        shell = win32com.client.Dispatch("WScript.Shell")
+        ps_exe = r"D:\Program Files\Adobe Photoshop 2025 v26.0\Adobe Photoshop 2025\Photoshop.exe"
+        shell.Run(f'"{ps_exe}" "{w_img}" "{b_img}"', 1, False)
+        import time; time.sleep(2)
+
+        for _ in range(20):
+            if psApp.Documents.Count >= 2: break
+            time.sleep(0.5)
+
+        for i in range(1, psApp.Documents.Count + 1):
+            doc = psApp.Documents(i)
+            if f"_B_黑T" in doc.Name:
+                psApp.ActiveDocument = doc; break
+        psApp.DoAction('黑', '正反图')
+
         jpgOpt = win32com.client.Dispatch("Photoshop.JPEGSaveOptions")
         jpgOpt.Quality = 12
-        backDoc.SaveAs(str(upload / f"{dx}_黑BW.jpg"), jpgOpt, True, 2)
-        backDoc.Close(2)
+        psApp.ActiveDocument.SaveAs(out_path, jpgOpt, True, 2)
+        psApp.ActiveDocument.Close(2)
+        for _ in range(psApp.Documents.Count, 0, -1):
+            try: psApp.Documents(_).Close(2)
+            except: pass
         return "✅ 黑BW 合成完成"
     except Exception as e:
         return f"❌ BW合成错误: {e}"

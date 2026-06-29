@@ -123,10 +123,14 @@ def place_design(design_path, torso_path, output_path, placement_cfg):
 
 
 def classify_design(filename):
-    """根据文件名分类设计图"""
+    """根据文件名分类设计图
+    BW/WB → 正面+背面都要做
+    B → 只做背面
+    W → 只做正面
+    """
     base = os.path.splitext(filename)[0]
 
-    if "_BW_" in base or "_BW" in base:
+    if "_BW_" in base or "_BW" in base or "_WB_" in base or "_WB" in base:
         return "BW"
     elif "_B_" in base or "_B" in base:
         return "B"

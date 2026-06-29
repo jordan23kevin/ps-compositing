@@ -93,18 +93,25 @@ def process_color(dx_folder, color, action_name, output_name):
     close_all_docs(ps)
     return True
 
-def main():
+def main(start_dx=None):
     log(f"扫描: {BASE}")
     folders = sorted([d for d in os.listdir(BASE)
                       if os.path.isdir(os.path.join(BASE, d)) and d.startswith('DX')])
-    log(f"发现 {len(folders)} 个 DX 文件夹")
+    if start_dx:
+        idx = next((i for i, f in enumerate(folders) if f == start_dx), 0)
+        folders = folders[idx:]
+    log(f"从 {start_dx or '开头'} 开始，发现 {len(folders)} 个 DX 文件夹")
 
     results = {"白T": 0, "黑T": 0, "跳过白": 0, "跳过黑": 0, "失败黑": []}
+    import time
+    dx_times = []
+    t_total = time.time()
 
     for folder_name in folders:
         log(f"\n{'='*50}")
         log(">> " + folder_name)
         log(f"{'='*50}")
+        t_dx = time.time()
 
         if process_color(folder_name, "白T", "白", f"{folder_name}_白BW.jpg"):
             results["白T"] += 1
@@ -125,15 +132,34 @@ def main():
                 close_all_docs(ps)
             except:
                 pass
+            dt_dx = time.time() - t_dx
+            dx_times.append((folder_name, dt_dx))
+            log(f"⏱️  {folder_name} 完成，耗时 {dt_dx:.1f}秒")
             continue
 
-    log(f"\n{'='*50}")
-    log(f"全部完成！")
+        dt_dx = time.time() - t_dx
+        dx_times.append((folder_name, dt_dx))
+        log(f"⏱️  {folder_name} 完成，耗时 {dt_dx:.1f}秒")
+
+    dt_total = time.time() - t_total
+    log(f"\n{'='*60}")
+    log(f"📊 全部完成！共 {len(dx_times)} 款")
     log(f"  白T生成: {results['白T']}  跳过: {results['跳过白']}")
     log(f"  黑T生成: {results['黑T']}  跳过: {results['跳过黑']}")
     if results["失败黑"]:
         log(f"  黑T异常需重试: {', '.join(results['失败黑'])}")
-    log(f"{'='*50}")
+    log(f"{'='*60}")
+    log(f"{'DX':<12} {'耗时(秒)':>10}")
+    log(f"{'-'*24}")
+    for name, dt in dx_times:
+        log(f"{name:<12} {dt:>10.1f}")
+    log(f"{'-'*24}")
+    log(f"{'总计':<12} {dt_total:>10.1f}  ({dt_total/60:.1f}分钟)")
+    if dx_times:
+        log(f"{'平均':<12} {dt_total/len(dx_times):>10.1f}")
+    log(f"{'='*60}")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    start = sys.argv[1] if len(sys.argv) > 1 else None
+    main(start)

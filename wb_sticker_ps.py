@@ -1,4 +1,5 @@
 import os
+import time
 import win32com.client
 import pythoncom
 import tempfile
@@ -51,21 +52,45 @@ def calculate_sticker_position(png_path):
 def place_design(design_path, torso_path, output_path, placement_cfg):
     """
     通用贴图函数（正图/背图共用）：
-    1. 用 duplicate 复制图层（保留原始尺寸和透明度）
-    2. 按配置缩放（百分比，相对于原始尺寸）
-    3. 旋转
-    4. 贴图最高有效像素 → PS Y = target_top_y
-    5. 贴图中心点 → PS X = target_center_x
+    1. Python预先trim透明边距 + 缩放贴图，保存为临时PNG
+    2. JSX只需duplicate + 移动 + 旋转
+    trim后图层左上角=有效像素左上角，移动moveY=targetTopY即可对齐
     """
     pythoncom.CoInitialize()
     try:
         psApp = win32com.client.Dispatch("Photoshop.Application")
+        t0 = time.time()
 
-        # 计算贴图位置
+        # 计算贴图位置（用于trim和缩放）
         pos = calculate_sticker_position(design_path)
         scale = placement_cfg["scale_percent"] / 100
-        scaled_top_y = pos["top_y"] * scale
-        scaled_center_x = pos["center_x"] * scale
+
+        # Python预先trim透明边距 + 缩放，保存为临时PNG
+        img = Image.open(design_path).convert("RGBA")
+        a = np.array(img)
+        alpha = a[:, :, 3]
+        mask = alpha >= ALPHA_THRESHOLD
+        ys, xs = np.where(mask)
+        # trim到有效像素区域
+        x0, x1 = xs.min(), xs.max() + 1
+        y0, y1 = ys.min(), ys.max() + 1
+        trimmed = img.crop((x0, y0, x1, y1))
+        # 缩放
+        new_w = int((x1 - x0) * scale)
+        new_h = int((y1 - y0) * scale)
+        scaled = trimmed.resize((new_w, new_h), Image.LANCZOS)
+
+        # 保存临时PNG
+        temp_dir = tempfile.gettempdir()
+        temp_design = os.path.join(temp_dir, "temp_design_scaled.png")
+        scaled.save(temp_design, "PNG")
+
+        # trim后图层左上角=有效像素左上角
+        # 中心点在图层内的x偏移 = new_w/2
+        # 要让中心点在target_center_x，图层左上角x = target_center_x - new_w/2
+        # 要让顶部在target_top_y，图层左上角y = target_top_y
+        move_x = placement_cfg["target_center_x"] - new_w / 2
+        move_y = placement_cfg["target_top_y"]
 
         # 读取并替换JSX
         jsx_path = os.path.join(os.path.dirname(__file__), "jsx", "place_design.jsx")
@@ -73,14 +98,11 @@ def place_design(design_path, torso_path, output_path, placement_cfg):
             jsx_content = f.read()
 
         jsx_content = jsx_content.replace("{{TORSO_PATH}}", torso_path.replace("\\", "\\\\"))
-        jsx_content = jsx_content.replace("{{DESIGN_PATH}}", design_path.replace("\\", "\\\\"))
+        jsx_content = jsx_content.replace("{{DESIGN_PATH}}", temp_design.replace("\\", "\\\\"))
         jsx_content = jsx_content.replace("{{OUTPUT_PATH}}", output_path.replace("\\", "\\\\"))
-        jsx_content = jsx_content.replace("{{TARGET_CENTER_X}}", str(placement_cfg["target_center_x"]))
-        jsx_content = jsx_content.replace("{{TARGET_TOP_Y}}", str(placement_cfg["target_top_y"]))
-        jsx_content = jsx_content.replace("{{SCALE_PERCENT}}", str(placement_cfg["scale_percent"]))
         jsx_content = jsx_content.replace("{{ROTATION}}", str(placement_cfg["rotation"]))
-        jsx_content = jsx_content.replace("{{SCALED_TOP_Y}}", str(scaled_top_y))
-        jsx_content = jsx_content.replace("{{SCALED_CENTER_X}}", str(scaled_center_x))
+        jsx_content = jsx_content.replace("{{MOVE_X}}", str(move_x))
+        jsx_content = jsx_content.replace("{{MOVE_Y}}", str(move_y))
 
         # 写入临时JSX
         temp_dir = tempfile.gettempdir()
@@ -89,7 +111,8 @@ def place_design(design_path, torso_path, output_path, placement_cfg):
             f.write(jsx_content)
 
         psApp.DoJavaScriptFile(temp_jsx)
-        print(f"✅ 生成: {output_path}")
+        dt = time.time() - t0
+        print(f"✅ 生成: {output_path}  ({dt:.1f}秒)")
 
     except Exception as e:
         print(f"❌ 错误: {e}")
@@ -118,18 +141,20 @@ def classify_design(filename):
 
 
 def process_dx_folder(dx_folder):
-    """处理单个 DX 文件夹"""
+    """处理单个 DX 文件夹，返回耗时（秒）"""
     dx_name = os.path.basename(dx_folder)
     rem_bg_folder = os.path.join(dx_folder, "02_REM_BG")
     upload_folder = os.path.join(dx_folder, "03_UPLOAD")
 
     if not os.path.exists(rem_bg_folder):
-        return
+        return 0.0
 
     os.makedirs(upload_folder, exist_ok=True)
+    t_dx = time.time()
 
     for file in os.listdir(rem_bg_folder):
-        if not file.lower().endswith(".png"):
+        # 只处理 _cut.png 文件，跳过其他（如 DXxxxx_B.png）
+        if not file.lower().endswith("_cut.png"):
             continue
 
         print(f"\n处理: {file}")
@@ -197,16 +222,47 @@ def process_dx_folder(dx_folder):
                 config.BACK_NEW,
             )
 
+    dt_dx = time.time() - t_dx
+    print(f"⏱️  {dx_name} 完成，耗时 {dt_dx:.1f}秒")
+    return dt_dx
 
-def main():
+
+def main(start_dx=None):
+    """批量处理所有 DX 文件夹
+    start_dx: 指定起始DX（如'DX0124'），从该文件夹开始处理（含）；None表示处理全部
+    """
     dx_root = config.SOURCE_BASE
-    for folder in os.listdir(dx_root):
-        if folder.startswith("DX"):
-            dx_folder = os.path.join(dx_root, folder)
-            if os.path.isdir(dx_folder):
-                print(f"\n===== 处理: {dx_folder} =====")
-                process_dx_folder(dx_folder)
+    folders = sorted([d for d in os.listdir(dx_root)
+                       if d.startswith("DX") and os.path.isdir(os.path.join(dx_root, d))])
+    if start_dx:
+        idx = next((i for i, f in enumerate(folders) if f == start_dx), 0)
+        folders = folders[idx:]
+        print(f"从 {start_dx} 开始，共 {len(folders)} 个文件夹")
+
+    t_total = time.time()
+    dx_times = []
+    for folder in folders:
+        dx_folder = os.path.join(dx_root, folder)
+        print(f"\n===== 处理: {dx_folder} =====")
+        dt = process_dx_folder(dx_folder)
+        dx_times.append((folder, dt))
+
+    dt_total = time.time() - t_total
+    # 汇总
+    print(f"\n{'='*60}")
+    print(f"📊 全部完成！共 {len(dx_times)} 款")
+    print(f"{'='*60}")
+    print(f"{'DX':<12} {'耗时(秒)':>10}")
+    print(f"{'-'*24}")
+    for name, dt in dx_times:
+        print(f"{name:<12} {dt:>10.1f}")
+    print(f"{'-'*24}")
+    print(f"{'总计':<12} {dt_total:>10.1f}  ({dt_total/60:.1f}分钟)")
+    print(f"{'平均':<12} {dt_total/len(dx_times):>10.1f}")
+    print(f"{'='*60}")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    start = sys.argv[1] if len(sys.argv) > 1 else None
+    main(start)

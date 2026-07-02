@@ -311,6 +311,7 @@ def _extract_role_from_name(filename: str) -> str:
 def migrate_dx(dx_dir: str | Path, fallback_group_prefix="G") -> dict:
     """扫描 DX 目录，基于现有文件和 source_map.json 构建 uid_map。
     用于旧项目迁移；已有 uid 的文件会保留。
+    旧项目无法准确知道 B/W 配对关系，默认按 DX  folder 聚合为同一 group。
     """
     dx_dir = Path(dx_dir)
     dx = dx_dir.name
@@ -320,6 +321,9 @@ def migrate_dx(dx_dir: str | Path, fallback_group_prefix="G") -> dict:
     smap = _read_json(dx_dir / "source_map.json", default={})
     src_by_file = {s.get("file", ""): s for s in smap.get("sources", [])}
 
+    # 旧项目按 DX 聚合为同一个 group（比每文件一个 group 更符合展示需求）
+    default_group_id = f"{fallback_group_prefix}_{dx}"
+
     # 扫描各 stage 目录
     stages = {
         "ai": dx_dir / "01_AI",
@@ -327,7 +331,6 @@ def migrate_dx(dx_dir: str | Path, fallback_group_prefix="G") -> dict:
         "sticker": dx_dir / "03_UPLOAD",
     }
 
-    seq = 1
     for stage, dir_path in stages.items():
         if not dir_path.exists():
             continue
@@ -357,8 +360,7 @@ def migrate_dx(dx_dir: str | Path, fallback_group_prefix="G") -> dict:
                     uid = f"UID_MIGRATED_{md5[:16]}"
 
             if not group_id:
-                group_id = f"{fallback_group_prefix}_{dx}_{seq:05d}"
-                seq += 1
+                group_id = default_group_id
 
             if not role:
                 role = _extract_role_from_name(f.name)

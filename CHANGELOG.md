@@ -4,7 +4,7 @@
 
 ### 新增：UID/group_id 元数据传播
 
-- 引入共享模块 `wb_meta.py`
+- 引入共享模块 `wb_meta.py` v2.0（MD5 主键 + UID sidecar）
 - 元数据统一写入 `D:\Semems WB\05_META\DXxxxx\`，与 `01_AI/02_REM_BG/03_UPLOAD` 图片分离
 - `wb_sticker_ps.py`
   - 读取 `_cut.png` sidecar，为每个上传成品写入 `05_META` 下的 `.meta.json`

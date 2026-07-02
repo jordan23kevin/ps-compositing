@@ -1,13 +1,17 @@
 """
-WB 全链路图片元数据管理模块 (v1.0)
+WB 全链路图片元数据管理模块 (v1.1)
 ==================================
 为 AI 生图 → 去背 → 贴图 → 上款 提供 UID/group_id 绑定能力，
 不依赖文件名，可承受重命名、重名、跨目录移动。
 
 核心机制：
-  1. 每个图片文件旁边放置同名 .meta.json sidecar（如 DX0255_B.png.meta.json）。
-  2. 每个 DX 文件夹维护 uid_map.json，汇总该 DX 下所有图片的 UID 关系。
-  3. 所有下游脚本读取 sidecar/uid_map，而不是解析文件名。
+  1. 所有元数据统一放在 D:/Semems WB/05_META/ 下，按 DX 分子目录，
+     结构与 02_PROJECTS 镜像对应：
+       02_PROJECTS/DXxxxx/01_AI/xxx.png
+       05_META/DXxxxx/01_AI/xxx.png.meta.json
+  2. 每个 DX 的 uid_map.json 放在 05_META/DXxxxx/uid_map.json。
+  3. 01_AI / 02_REM_BG / 03_UPLOAD 只放图片，不放文档。
+  4. 所有下游脚本读取 sidecar/uid_map，而不是解析文件名。
 
 约定：
   - uid: 全局唯一，如 UID_20250702_0001
@@ -22,11 +26,13 @@ import hashlib
 import os
 import time
 import re
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 BASE_DIR = Path("D:/Semems WB")
 PROJECTS_DIR = BASE_DIR / "02_PROJECTS"
+META_DIR = BASE_DIR / "05_META"
 
 # ---------------------------------------------------------------------------
 # 基础工具
@@ -64,13 +70,27 @@ def _read_json(path: Path, default=None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Sidecar 操作（每张图片一个 .meta.json）
+# Sidecar 操作（元数据放在 05_META，与图片分离）
 # ---------------------------------------------------------------------------
 
 def meta_path(path: str | Path) -> Path:
-    """返回图片 path 对应的 sidecar 路径"""
-    p = Path(path)
-    return p.with_suffix(p.suffix + ".meta.json")
+    """返回图片 path 对应的 sidecar 路径（位于 05_META/DXxxxx/，镜像图片路径）"""
+    p = Path(path).resolve()
+    # 如果 path 已经在 05_META 下，直接返回
+    try:
+        p.relative_to(META_DIR)
+        return p
+    except ValueError:
+        pass
+    # 在 05_META 下镜像路径；去掉 02_PROJECTS 前缀
+    try:
+        rel = p.relative_to(PROJECTS_DIR)
+    except ValueError:
+        try:
+            rel = p.relative_to(BASE_DIR)
+        except ValueError:
+            rel = p
+    return META_DIR / rel.with_suffix(rel.suffix + ".meta.json")
 
 
 def read_meta(path: str | Path) -> Optional[dict]:
@@ -81,7 +101,7 @@ def read_meta(path: str | Path) -> Optional[dict]:
 
 
 def write_meta(path: str | Path, data: dict):
-    """写入图片 sidecar"""
+    """写入图片 sidecar 到 05_META"""
     mp = meta_path(path)
     mp.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_json(mp, data)
@@ -105,12 +125,13 @@ def update_meta(path: str | Path, **kwargs) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
-# UID Map 操作（每个 DX 一个 uid_map.json）
+# UID Map 操作（每个 DX 一个 uid_map.json，放在 05_META）
 # ---------------------------------------------------------------------------
 
 def uid_map_path(dx_dir: str | Path) -> Path:
-    """返回 DX 目录的 uid_map.json 路径"""
-    return Path(dx_dir) / "uid_map.json"
+    """返回 DX 目录的 uid_map.json 路径（位于 05_META/DXxxxx/）"""
+    dx = Path(dx_dir).name
+    return META_DIR / dx / "uid_map.json"
 
 
 def read_uid_map(dx_dir: str | Path) -> dict:
@@ -347,8 +368,12 @@ def migrate_dx(dx_dir: str | Path, fallback_group_prefix="G") -> dict:
             if f.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
                 continue
 
-            # 读取已有 meta（保留 uid，但 group_id 由迁移统一重建）
+            # 读取已有 meta（优先 05_META，再兼容旧位置图片旁边）
             meta = read_meta(f)
+            if not meta:
+                legacy_meta = f.with_suffix(f.suffix + ".meta.json")
+                if legacy_meta.exists():
+                    meta = _read_json(legacy_meta)
             uid = meta.get("uid") if meta else None
             role = meta.get("role") if meta else None
 

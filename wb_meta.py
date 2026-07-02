@@ -378,9 +378,9 @@ def migrate_all_projects():
         if d.is_dir() and re.match(r"^DX\d+$", d.name):
             try:
                 migrate_dx(d)
-                print(f"[wb_meta] 迁移完成: {d.name}")
+                print(f"[wb_meta] OK migrate: {d.name}")
             except Exception as e:
-                print(f"[wb_meta] 迁移失败 {d.name}: {e}")
+                print(f"[wb_meta] ERR migrate {d.name}: {e}")
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
-# ===== PS 正反图批处理 v1.2.0 =====
+# ===== PS 正反图批处理 v1.3.0 =====
+# 变更 v1.3.0：Photoshop 窗口全程最小化/隐藏，不抢焦点
 # 直读03_UPLOAD贴图结果，直写03_UPLOAD BW合成图
 import io, win32com.client, os, time, sys
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -11,7 +12,8 @@ def log(msg):
 
 def ps_open_both(back_img, front_img):
     shell = win32com.client.Dispatch('WScript.Shell')
-    shell.Run(f'"{PS_EXE}" "{front_img}" "{back_img}"', 1, False)
+    # 7 = SW_SHOWMINNOACTIVE：最小化打开，不抢焦点
+    shell.Run(f'"{PS_EXE}" "{front_img}" "{back_img}"', 7, False)
 
 def wait_ps_docs(target_count=2, timeout=20):
     for _ in range(timeout):
@@ -66,6 +68,10 @@ def process_color(dx_folder, color, action_name, output_name):
         pass
     ps_open_both(back_img, front_img)
     ps = wait_ps_docs(2)
+    try:
+        ps.Visible = False
+    except Exception:
+        pass
     log(f"  已打开 {ps.Documents.Count} 个文档")
 
     for i in range(1, ps.Documents.Count + 1):

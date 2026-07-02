@@ -1,4 +1,9 @@
-"""黑T贴图处理 — 反相完成后调用，PS贴图+BW合成全覆盖"""
+"""黑T贴图处理 v2.1 — 反相完成后调用，PS贴图+BW合成全覆盖
+
+变更 v2.1：
+  - Photoshop 窗口全程隐藏（psApp.Visible = False），不抢焦点
+  - 与 check_rem.py /invert-rem 联动：反相生成黑版专用图后自动调用本脚本
+"""
 import os, sys, tempfile, time
 from pathlib import Path
 from PIL import Image
@@ -26,6 +31,10 @@ def place_one(side, cfg, inv_path, dx, upload, torso_color="black"):
     pythoncom.CoInitialize()
     try:
         psApp = win32com.client.Dispatch("Photoshop.Application")
+        try:
+            psApp.Visible = False
+        except Exception:
+            pass
         psApp.DisplayDialogs = 3
 
         torso_file = cfg[f"torso_{torso_color}"]
@@ -86,6 +95,10 @@ def bw_synth(dx, upload):
     pythoncom.CoInitialize()
     try:
         psApp = win32com.client.Dispatch("Photoshop.Application")
+        try:
+            psApp.Visible = False
+        except Exception:
+            pass
         psApp.DisplayDialogs = 3
         b_img = str(upload / f"{dx}_B_黑T.jpg")
         w_img = str(upload / f"{dx}_W_黑T.jpg")

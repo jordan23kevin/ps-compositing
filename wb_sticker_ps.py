@@ -1,3 +1,8 @@
+# ===== WB 贴图主控 v2.1 =====
+# 变更 v2.1：
+#   - 黑T优先使用 02_REM_BG 中的 _黑B/_黑W/_黑BW 专用文件
+#   - 检测到黑版专用文件时，通用图不再输出黑T成品，仅输出白T
+#   - Photoshop 窗口全程隐藏，不抢焦点
 import os
 import time
 import win32com.client
@@ -59,6 +64,10 @@ def place_design(design_path, torso_path, output_path, placement_cfg):
     pythoncom.CoInitialize()
     try:
         psApp = win32com.client.Dispatch("Photoshop.Application")
+        try:
+            psApp.Visible = False
+        except Exception:
+            pass
         t0 = time.time()
 
         # 计算贴图位置（用于trim和缩放）
@@ -144,6 +153,21 @@ def classify_design(filename):
         return "W"
 
 
+def black_counterpart(file, dx):
+    """返回通用_cut文件对应的黑版专用文件名（如 DX_B_cut.png → DX_黑B_cut.png）。
+    不存在对应关系时返回 None。"""
+    if "_黑" in file or not file.lower().endswith("_cut.png"):
+        return None
+    stem = file[:-len("_cut.png")]  # e.g. DXxxxx_B 或 DXxxxx_BW
+    if stem == f"{dx}_BW":
+        return f"{dx}_黑BW_cut.png"
+    if stem == f"{dx}_B":
+        return f"{dx}_黑B_cut.png"
+    if stem == f"{dx}_W":
+        return f"{dx}_黑W_cut.png"
+    return None
+
+
 def process_dx_folder(dx_folder):
     """处理单个 DX 文件夹，返回耗时（秒）"""
     dx_name = os.path.basename(dx_folder)
@@ -160,13 +184,19 @@ def process_dx_folder(dx_folder):
         # 只处理 _cut.png 文件，跳过其他（如 DXxxxx_B.png）
         if not file.lower().endswith("_cut.png"):
             continue
-        # 跳过黑版（反相生成的文件，含_黑）
+        # 跳过黑版（反相生成的文件，含_黑），黑T贴图由 process_black.py 处理
         if "_黑" in file:
             continue
 
         print(f"\n处理: {file}")
         design_path = os.path.join(rem_bg_folder, file)
         design_type = classify_design(file)
+
+        # 如果存在对应的黑版专用文件，则通用图不再用于黑T
+        black_file = black_counterpart(file, dx_name)
+        has_black = black_file and os.path.exists(os.path.join(rem_bg_folder, black_file))
+        if has_black:
+            print(f"  发现黑版专用 {black_file}，通用图仅用于白T")
 
         if design_type == "BW":
             # ===== BW 类型：生成 W 和 B 两套文件，供 ps_batch.py 合成 =====
@@ -177,12 +207,13 @@ def process_dx_folder(dx_folder):
                 os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
                 config.FRONT_NEW,
             )
-            place_design(
-                design_path,
-                os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
-                os.path.join(upload_folder, f"{dx_name}_W_黑T.jpg"),
-                config.FRONT_NEW,
-            )
+            if not has_black:
+                place_design(
+                    design_path,
+                    os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
+                    os.path.join(upload_folder, f"{dx_name}_W_黑T.jpg"),
+                    config.FRONT_NEW,
+                )
 
             print("  → 生成 B 背面文件（新方案）...")
             place_design(
@@ -191,12 +222,13 @@ def process_dx_folder(dx_folder):
                 os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
                 config.BACK_NEW,
             )
-            place_design(
-                design_path,
-                os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
-                os.path.join(upload_folder, f"{dx_name}_B_黑T.jpg"),
-                config.BACK_NEW,
-            )
+            if not has_black:
+                place_design(
+                    design_path,
+                    os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
+                    os.path.join(upload_folder, f"{dx_name}_B_黑T.jpg"),
+                    config.BACK_NEW,
+                )
             print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
 
         elif design_type == "W":
@@ -207,12 +239,13 @@ def process_dx_folder(dx_folder):
                 os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
                 config.FRONT_NEW,
             )
-            place_design(
-                design_path,
-                os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
-                os.path.join(upload_folder, f"{dx_name}_W_黑T.jpg"),
-                config.FRONT_NEW,
-            )
+            if not has_black:
+                place_design(
+                    design_path,
+                    os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
+                    os.path.join(upload_folder, f"{dx_name}_W_黑T.jpg"),
+                    config.FRONT_NEW,
+                )
 
         elif design_type == "B":
             # ===== B 类型：背图新方案 =====
@@ -222,12 +255,13 @@ def process_dx_folder(dx_folder):
                 os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
                 config.BACK_NEW,
             )
-            place_design(
-                design_path,
-                os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
-                os.path.join(upload_folder, f"{dx_name}_B_黑T.jpg"),
-                config.BACK_NEW,
-            )
+            if not has_black:
+                place_design(
+                    design_path,
+                    os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
+                    os.path.join(upload_folder, f"{dx_name}_B_黑T.jpg"),
+                    config.BACK_NEW,
+                )
 
     dt_dx = time.time() - t_dx
     print(f"⏱️  {dx_name} 完成，耗时 {dt_dx:.1f}秒")

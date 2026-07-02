@@ -6,6 +6,11 @@
 """
 import sys, os, time
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, r"E:\Claude code\ps")
+try:
+    import wb_meta
+except Exception:
+    wb_meta = None
 from wb_sticker_ps import process_dx_folder
 from config import SOURCE_BASE
 

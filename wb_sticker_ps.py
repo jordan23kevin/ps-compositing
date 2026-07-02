@@ -4,15 +4,76 @@
 #   - 检测到黑版专用文件时，通用图不再输出黑T成品，仅输出白T
 #   - Photoshop 窗口全程隐藏，不抢焦点
 import os
+import re
+import sys
 import time
 import win32com.client
 import pythoncom
 import tempfile
+from pathlib import Path
 from PIL import Image
 import numpy as np
 import config
 
+sys.path.insert(0, r"E:\Claude code\ps")
+try:
+    import wb_meta
+except Exception:
+    wb_meta = None
+
 ALPHA_THRESHOLD = 20
+
+# ---------------------------------------------------------------------------
+# 元数据辅助（读取 _cut.png sidecar，为上传图注册）
+# ---------------------------------------------------------------------------
+_MIGRATED_DX = set()
+
+
+def _role_from_name(name):
+    """从文件名推断 role（支持 _cut.png / 上传图 / BW 合成图）"""
+    stem = os.path.splitext(name)[0]
+    if stem.endswith("_cut"):
+        stem = stem[:-4]
+    parts = stem.split("_")
+    if len(parts) >= 3 and parts[-1] in ("白T", "黑T"):
+        side = parts[-2]
+        torso = parts[-1]
+        if torso == "黑T":
+            return f"黑{side}"
+        return side
+    if len(parts) >= 2:
+        return parts[-1]
+    return "?"
+
+
+def _infer_meta(path):
+    """sidecar 完全缺失时的文件名兜底推断"""
+    name = os.path.basename(path)
+    dx = name.split("_")[0] if "_" in name else "DX"
+    role = _role_from_name(name)
+    uid = f"UID_{dx}_{re.sub(r'[^A-Za-z0-9]', '_', role)}"
+    group_id = f"G_{dx}_{role}"
+    return {"uid": uid, "group_id": group_id, "role": role, "stage": "unknown"}
+
+
+def _get_cut_meta(cut_path):
+    """读取去背图 sidecar；缺失时尝试 migrate_dx，最后兜底推断"""
+    if wb_meta is None:
+        return None
+    dx_dir = str(Path(cut_path).parent.parent)
+    meta = wb_meta.read_meta(cut_path)
+    if meta:
+        return meta
+    if dx_dir not in _MIGRATED_DX:
+        try:
+            wb_meta.migrate_dx(dx_dir)
+        except Exception as e:
+            print(f"  ⚠️ migrate_dx 失败 {dx_dir}: {e}")
+        _MIGRATED_DX.add(dx_dir)
+    meta = wb_meta.read_meta(cut_path)
+    if meta:
+        return meta
+    return _infer_meta(cut_path)
 
 
 def calculate_sticker_position(png_path):
@@ -54,12 +115,14 @@ def calculate_sticker_position(png_path):
     }
 
 
-def place_design(design_path, torso_path, output_path, placement_cfg):
+def place_design(design_path, torso_path, output_path, placement_cfg, cut_meta=None):
     """
     通用贴图函数（正图/背图共用）：
     1. Python预先trim透明边距 + 缩放贴图，保存为临时PNG
     2. JSX只需duplicate + 移动 + 旋转
     trim后图层左上角=有效像素左上角，移动moveY=targetTopY即可对齐
+
+    cut_meta: 去背图 sidecar 内容，提供时会把输出注册到 uid_map
     """
     pythoncom.CoInitialize()
     try:
@@ -122,6 +185,21 @@ def place_design(design_path, torso_path, output_path, placement_cfg):
         psApp.DoJavaScriptFile(temp_jsx)
         dt = time.time() - t0
         print(f"✅ 生成: {output_path}  ({dt:.1f}秒)")
+
+        if cut_meta is not None and wb_meta is not None:
+            try:
+                out_name = os.path.basename(output_path)
+                role = _role_from_name(out_name)
+                wb_meta.register_sticker(
+                    output_path,
+                    uid=cut_meta["uid"],
+                    group_id=cut_meta["group_id"],
+                    role=role,
+                    parent_uid=cut_meta["uid"],
+                    cut_file=os.path.basename(design_path),
+                )
+            except Exception as e:
+                print(f"  ⚠️ 元数据注册失败: {e}")
 
     except Exception as e:
         print(f"❌ 错误: {e}")
@@ -191,6 +269,7 @@ def process_dx_folder(dx_folder):
         print(f"\n处理: {file}")
         design_path = os.path.join(rem_bg_folder, file)
         design_type = classify_design(file)
+        cut_meta = _get_cut_meta(design_path)
 
         # 如果存在对应的黑版专用文件，则通用图不再用于黑T
         black_file = black_counterpart(file, dx_name)
@@ -206,6 +285,7 @@ def process_dx_folder(dx_folder):
                 os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
                 os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
                 config.FRONT_NEW,
+                cut_meta=cut_meta,
             )
             if not has_black:
                 place_design(
@@ -213,6 +293,7 @@ def process_dx_folder(dx_folder):
                     os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
                     os.path.join(upload_folder, f"{dx_name}_W_黑T.jpg"),
                     config.FRONT_NEW,
+                    cut_meta=cut_meta,
                 )
 
             print("  → 生成 B 背面文件（新方案）...")
@@ -221,6 +302,7 @@ def process_dx_folder(dx_folder):
                 os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
                 os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
                 config.BACK_NEW,
+                cut_meta=cut_meta,
             )
             if not has_black:
                 place_design(
@@ -228,6 +310,7 @@ def process_dx_folder(dx_folder):
                     os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
                     os.path.join(upload_folder, f"{dx_name}_B_黑T.jpg"),
                     config.BACK_NEW,
+                    cut_meta=cut_meta,
                 )
             print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
 
@@ -238,6 +321,7 @@ def process_dx_folder(dx_folder):
                 os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
                 os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
                 config.FRONT_NEW,
+                cut_meta=cut_meta,
             )
             if not has_black:
                 place_design(
@@ -245,6 +329,7 @@ def process_dx_folder(dx_folder):
                     os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
                     os.path.join(upload_folder, f"{dx_name}_W_黑T.jpg"),
                     config.FRONT_NEW,
+                    cut_meta=cut_meta,
                 )
 
         elif design_type == "B":
@@ -254,6 +339,7 @@ def process_dx_folder(dx_folder):
                 os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
                 os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
                 config.BACK_NEW,
+                cut_meta=cut_meta,
             )
             if not has_black:
                 place_design(
@@ -261,6 +347,7 @@ def process_dx_folder(dx_folder):
                     os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
                     os.path.join(upload_folder, f"{dx_name}_B_黑T.jpg"),
                     config.BACK_NEW,
+                    cut_meta=cut_meta,
                 )
 
     dt_dx = time.time() - t_dx

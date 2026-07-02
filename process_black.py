@@ -4,14 +4,72 @@
   - Photoshop 窗口全程隐藏（psApp.Visible = False），不抢焦点
   - 与 check_rem.py /invert-rem 联动：反相生成黑版专用图后自动调用本脚本
 """
-import os, sys, tempfile, time
+import os, re, sys, tempfile, time
 from pathlib import Path
 from PIL import Image
 import numpy as np
 
+sys.path.insert(0, r"E:\Claude code\ps")
+try:
+    import wb_meta
+except Exception:
+    wb_meta = None
+
 ALPHA_THRESHOLD = 20
 BASE = Path(r"D:\Semems WB\02_PROJECTS")
 TORSO = Path(r"D:\Semems\1胚衣")
+
+# ---------------------------------------------------------------------------
+# 元数据辅助
+# ---------------------------------------------------------------------------
+_MIGRATED_DX = set()
+
+
+def _role_from_name(name):
+    """从文件名推断 role（支持 _cut.png / 上传图 / BW 合成图）"""
+    stem = os.path.splitext(name)[0]
+    if stem.endswith("_cut"):
+        stem = stem[:-4]
+    parts = stem.split("_")
+    if len(parts) >= 3 and parts[-1] in ("白T", "黑T"):
+        side = parts[-2]
+        torso = parts[-1]
+        if torso == "黑T":
+            return f"黑{side}"
+        return side
+    if len(parts) >= 2:
+        return parts[-1]
+    return "?"
+
+
+def _infer_meta(path):
+    """sidecar 完全缺失时的文件名兜底推断"""
+    name = os.path.basename(path)
+    dx = name.split("_")[0] if "_" in name else "DX"
+    role = _role_from_name(name)
+    uid = f"UID_{dx}_{re.sub(r'[^A-Za-z0-9]', '_', role)}"
+    group_id = f"G_{dx}_{role}"
+    return {"uid": uid, "group_id": group_id, "role": role, "stage": "unknown"}
+
+
+def _get_meta(path):
+    """读取 sidecar；缺失时 migrate_dx，最后兜底推断"""
+    if wb_meta is None:
+        return None
+    dx_dir = str(Path(path).parent.parent)
+    meta = wb_meta.read_meta(path)
+    if meta:
+        return meta
+    if dx_dir not in _MIGRATED_DX:
+        try:
+            wb_meta.migrate_dx(dx_dir)
+        except Exception as e:
+            print(f"  ⚠️ migrate_dx 失败 {dx_dir}: {e}")
+        _MIGRATED_DX.add(dx_dir)
+    meta = wb_meta.read_meta(path)
+    if meta:
+        return meta
+    return _infer_meta(path)
 
 BACK_NEW = {
     "torso_white": "白背2.jpg", "torso_black": "黑背2.jpg",
@@ -25,8 +83,11 @@ FRONT_NEW = {
 }
 
 
-def place_one(side, cfg, inv_path, dx, upload, torso_color="black"):
-    """PS贴图：trim+缩放+贴到胚衣+保存"""
+def place_one(side, cfg, inv_path, dx, upload, torso_color="black", cut_meta=None):
+    """PS贴图：trim+缩放+贴到胚衣+保存
+
+    cut_meta: 黑版去背图 sidecar 内容，提供时注册上传图元数据
+    """
     import win32com.client, pythoncom
     pythoncom.CoInitialize()
     try:
@@ -81,6 +142,21 @@ def place_one(side, cfg, inv_path, dx, upload, torso_color="black"):
         with open(temp_jsx, "w", encoding="utf-8") as jf:
             jf.write(jsx)
         psApp.DoJavaScriptFile(temp_jsx)
+
+        if cut_meta is not None and wb_meta is not None:
+            try:
+                role = _role_from_name(output_name)
+                wb_meta.register_sticker(
+                    output_path,
+                    uid=cut_meta["uid"],
+                    group_id=cut_meta["group_id"],
+                    role=role,
+                    parent_uid=cut_meta["uid"],
+                    cut_file=os.path.basename(inv_path),
+                )
+            except Exception as e:
+                print(f"  ⚠️ 元数据注册失败({side}): {e}")
+
         return output_name
     except Exception as e:
         print(f"  ❌ PS错误({side},{torso_color}): {e}")
@@ -127,6 +203,26 @@ def bw_synth(dx, upload):
         for _ in range(psApp.Documents.Count, 0, -1):
             try: psApp.Documents(_).Close(2)
             except: pass
+
+        if wb_meta is not None:
+            try:
+                meta_b = _get_meta(b_img)
+                meta_w = _get_meta(w_img)
+                uid = meta_b.get("uid") or meta_w.get("uid")
+                group_id = meta_b.get("group_id") or meta_w.get("group_id")
+                bw_role = "黑BW"
+                bw_uid = f"{uid}_{bw_role}" if uid else None
+                wb_meta.register_bw(
+                    out_path,
+                    uid=bw_uid,
+                    group_id=group_id,
+                    role=bw_role,
+                    source_uids=[meta_b.get("uid"), meta_w.get("uid")],
+                    source_files=[os.path.basename(b_img), os.path.basename(w_img)],
+                )
+            except Exception as e:
+                print(f"  ⚠️ 黑BW元数据注册失败: {e}")
+
         return "✅ 黑BW 合成完成"
     except Exception as e:
         return f"❌ BW合成错误: {e}"
@@ -148,13 +244,14 @@ def main():
     tasks = []
     for inv_path in sorted(rembg.glob(f"{dx}_黑*_cut.png")):
         letter = Path(inv_path).stem.replace(f"{dx}_黑", "").replace("_cut", "")
+        meta = _get_meta(str(inv_path))
         if letter == "B":
-            tasks.append(("B", BACK_NEW, inv_path))
+            tasks.append(("B", BACK_NEW, inv_path, meta))
         elif letter == "W":
-            tasks.append(("W", FRONT_NEW, inv_path))
+            tasks.append(("W", FRONT_NEW, inv_path, meta))
         elif letter == "WB" or letter == "BW":
-            tasks.append(("B", BACK_NEW, inv_path))
-            tasks.append(("W", FRONT_NEW, inv_path))
+            tasks.append(("B", BACK_NEW, inv_path, meta))
+            tasks.append(("W", FRONT_NEW, inv_path, meta))
 
     if not tasks:
         print("❌ 未找到黑版_cut文件")
@@ -162,13 +259,13 @@ def main():
 
     # 贴图：只做黑色胚衣版本
     print(f"\n--- 贴图 ({len(tasks)}张) ---")
-    for side, cfg, inv_path in tasks:
-        r = place_one(side, cfg, inv_path, dx, upload, "black")
+    for side, cfg, inv_path, meta in tasks:
+        r = place_one(side, cfg, inv_path, dx, upload, "black", cut_meta=meta)
         if r: print(f"  ✅ {r}")
 
     # BW合成
-    has_b = any(s == "B" for s, _, _ in tasks)
-    has_w = any(s == "W" for s, _, _ in tasks)
+    has_b = any(s == "B" for s, _, _, _ in tasks)
+    has_w = any(s == "W" for s, _, _, _ in tasks)
     if has_b and has_w:
         print("\n--- BW合成 ---")
         print(f"  {bw_synth(dx, upload)}")

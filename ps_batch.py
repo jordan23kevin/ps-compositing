@@ -2,10 +2,69 @@
 # 变更 v1.3.0：Photoshop 窗口全程最小化/隐藏，不抢焦点
 # 直读03_UPLOAD贴图结果，直写03_UPLOAD BW合成图
 import io, win32com.client, os, time, sys
+from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 BASE = r"D:\Semems WB\02_PROJECTS"
 PS_EXE = r"D:\Program Files\Adobe Photoshop 2025 v26.0\Adobe Photoshop 2025\Photoshop.exe"
+
+sys.path.insert(0, r"E:\Claude code\ps")
+try:
+    import wb_meta
+except Exception:
+    wb_meta = None
+
+# ---------------------------------------------------------------------------
+# 元数据辅助
+# ---------------------------------------------------------------------------
+_MIGRATED_DX = set()
+
+
+def _role_from_name(name):
+    """从文件名推断 role（支持上传图 / BW 合成图）"""
+    stem = os.path.splitext(name)[0]
+    if stem.endswith("_cut"):
+        stem = stem[:-4]
+    parts = stem.split("_")
+    if len(parts) >= 3 and parts[-1] in ("白T", "黑T"):
+        side = parts[-2]
+        torso = parts[-1]
+        if torso == "黑T":
+            return f"黑{side}"
+        return side
+    if len(parts) >= 2:
+        return parts[-1]
+    return "?"
+
+
+def _infer_meta(path):
+    """sidecar 完全缺失时的文件名兜底推断"""
+    name = os.path.basename(path)
+    dx = name.split("_")[0] if "_" in name else "DX"
+    role = _role_from_name(name)
+    uid = f"UID_{dx}_{role}"
+    group_id = f"G_{dx}_{role}"
+    return {"uid": uid, "group_id": group_id, "role": role, "stage": "unknown"}
+
+
+def _get_meta(path):
+    """读取上传图 sidecar；缺失时 migrate_dx，最后兜底推断"""
+    if wb_meta is None:
+        return None
+    dx_dir = str(Path(path).parent.parent)
+    meta = wb_meta.read_meta(path)
+    if meta:
+        return meta
+    if dx_dir not in _MIGRATED_DX:
+        try:
+            wb_meta.migrate_dx(dx_dir)
+        except Exception as e:
+            log(f"migrate_dx 失败 {dx_dir}: {e}")
+        _MIGRATED_DX.add(dx_dir)
+    meta = wb_meta.read_meta(path)
+    if meta:
+        return meta
+    return _infer_meta(path)
 
 def log(msg):
     print(f"[PS] {msg}", flush=True)
@@ -95,6 +154,26 @@ def process_color(dx_folder, color, action_name, output_name):
     ps.ActiveDocument.Export(ExportIn=out_path, ExportAs=2, Options=export_opts)
     size = os.path.getsize(out_path)
     log(f"  OK: {output_name} ({size/1024:.0f}KB)")
+
+    if wb_meta is not None:
+        try:
+            meta_b = _get_meta(back_img)
+            meta_w = _get_meta(front_img)
+            uid = meta_b.get("uid") or meta_w.get("uid")
+            group_id = meta_b.get("group_id") or meta_w.get("group_id")
+            bw_role = _role_from_name(output_name)
+            bw_uid = f"{uid}_{bw_role}" if uid else None
+            wb_meta.register_bw(
+                out_path,
+                uid=bw_uid,
+                group_id=group_id,
+                role=bw_role,
+                source_uids=[meta_b.get("uid"), meta_w.get("uid")],
+                source_files=[os.path.basename(back_img), os.path.basename(front_img)],
+            )
+            log(f"  BW元数据已注册: {bw_role}")
+        except Exception as e:
+            log(f"  BW元数据注册失败: {e}")
 
     close_all_docs(ps)
     return True

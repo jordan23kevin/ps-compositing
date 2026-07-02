@@ -318,6 +318,11 @@ def migrate_dx(dx_dir: str | Path, fallback_group_prefix="G") -> dict:
     data = ensure_uid_map(dx_dir)
     data["dx"] = dx
 
+    # 迁移是重建过程：清空旧的 groups/images，避免残留旧 group
+    data["groups"] = {}
+    data["images"] = {}
+    write_uid_map(dx_dir, data)  # 先写空，防止 register_image_in_map 重新读到旧数据
+
     smap = _read_json(dx_dir / "source_map.json", default={})
     src_by_file = {s.get("file", ""): s for s in smap.get("sources", [])}
 
@@ -342,10 +347,9 @@ def migrate_dx(dx_dir: str | Path, fallback_group_prefix="G") -> dict:
             if f.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
                 continue
 
-            # 已有 meta 则优先使用
+            # 读取已有 meta（保留 uid，但 group_id 由迁移统一重建）
             meta = read_meta(f)
             uid = meta.get("uid") if meta else None
-            group_id = meta.get("group_id") if meta else None
             role = meta.get("role") if meta else None
 
             if not uid:
@@ -359,8 +363,8 @@ def migrate_dx(dx_dir: str | Path, fallback_group_prefix="G") -> dict:
                     md5 = compute_md5(f)
                     uid = f"UID_MIGRATED_{md5[:16]}"
 
-            if not group_id:
-                group_id = default_group_id
+            # 迁移统一按 DX 聚合 group
+            group_id = default_group_id
 
             if not role:
                 role = _extract_role_from_name(f.name)

@@ -165,9 +165,20 @@ class StickerSession:
         self.temp_dir = tempfile.gettempdir()
 
     def _open_file(self, file_path):
-        ps_file = win32com.client.Dispatch("Photoshop.File")
-        ps_file.Path = file_path
-        return self.ps_app.Open(ps_file)
+        """通过 JSX app.open 打开文件，并返回当前活动文档对象。
+        比 ps_app.Open(File) 更可靠，且能正确获取文档引用。"""
+        doc_name = os.path.basename(file_path)
+        jsx = (
+            'var f = new File("' + file_path.replace("\\", "\\\\") + '");\n'
+            'app.open(f);\n'
+        )
+        temp_jsx = os.path.join(self.temp_dir, f"_open_{doc_name}.jsx")
+        with open(temp_jsx, "w", encoding="utf-8") as f:
+            f.write(jsx)
+        self.ps_app.DoJavaScriptFile(temp_jsx)
+        config.hide_ps_window(self.ps_app)
+        # 打开后当前活动文档即为刚打开的文档
+        return self.ps_app.ActiveDocument
 
     def _get_torso_doc(self, torso_path):
         """获取缓存的胚衣文档；没有则打开并缓存。"""

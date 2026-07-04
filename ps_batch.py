@@ -4,7 +4,7 @@
 #   - 每个 DX 一次打开 B/W 正背图，连续执行白/黑动作后统一关闭
 #   - 用主动轮询替代硬编码 sleep，减少等待
 # 直读03_UPLOAD贴图结果，直写03_UPLOAD BW合成图
-import io, win32com.client, pythoncom, os, time, sys
+import io, win32com.client, pythoncom, os, time, sys, tempfile
 from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
@@ -86,10 +86,18 @@ def get_ps(timeout=10):
 
 
 def open_doc(ps, img_path):
-    """通过 COM 打开一个图片文件。"""
-    ps_file = win32com.client.Dispatch("Photoshop.File")
-    ps_file.Path = img_path
-    return ps.Open(ps_file)
+    """通过 JSX app.open 打开一个图片文件，并返回当前活动文档。"""
+    doc_name = os.path.basename(img_path)
+    jsx = (
+        'var f = new File("' + img_path.replace("\\", "\\\\") + '");\n'
+        'app.open(f);\n'
+    )
+    temp_jsx = os.path.join(tempfile.gettempdir(), f"_open_{doc_name}.jsx")
+    with open(temp_jsx, "w", encoding="utf-8") as f:
+        f.write(jsx)
+    ps.DoJavaScriptFile(temp_jsx)
+    config.hide_ps_window(ps)
+    return ps.ActiveDocument
 
 
 def wait_docs(ps, target_count, timeout=10):

@@ -1,10 +1,13 @@
-"""黑T贴图处理 v2.1 — 反相完成后调用，PS贴图+BW合成全覆盖
+"""黑T贴图处理 v2.2 — 反相完成后调用，PS贴图+BW合成全覆盖
 
-变更 v2.1：
-  - Photoshop 窗口可见并最小化（psApp.Visible = True），方便观察任务进度
+变更 v2.2：
+  - 单 DX 内复用 Photoshop COM 会话，缓存黑胚衣文档
+  - 用主动轮询替代硬编码 sleep
   - 与 check_rem.py /invert-rem 联动：反相生成黑版专用图后自动调用本脚本
 """
 import os, re, sys, tempfile, time
+import win32com.client
+import pythoncom
 from pathlib import Path
 from PIL import Image
 import numpy as np
@@ -84,61 +87,81 @@ FRONT_NEW = {
 }
 
 
-def place_one(side, cfg, inv_path, dx, upload, torso_color="black", cut_meta=None):
-    """PS贴图：trim+缩放+贴到胚衣+保存
+# ---------------------------------------------------------------------------
+# Photoshop 会话：单 DX 内复用 COM、缓存黑胚衣文档
+# ---------------------------------------------------------------------------
+class BlackStickerSession:
+    def __init__(self):
+        pythoncom.CoInitialize()
+        self.ps_app = win32com.client.Dispatch("Photoshop.Application")
+        self.ps_app.DisplayDialogs = 3  # DialogModes.NO
+        hide_ps_window(self.ps_app)
+        self.torso_docs = {}      # torso_path -> doc
+        self.design_doc = None
+        self.design_doc_name = None
+        self.temp_dir = tempfile.gettempdir()
 
-    cut_meta: 黑版去背图 sidecar 内容，提供时注册上传图元数据
-    """
-    import win32com.client, pythoncom
-    pythoncom.CoInitialize()
-    try:
-        psApp = win32com.client.Dispatch("Photoshop.Application")
-        hide_ps_window(psApp)
-        psApp.DisplayDialogs = 3
+    def _open_file(self, file_path):
+        ps_file = win32com.client.Dispatch("Photoshop.File")
+        ps_file.Path = file_path
+        return self.ps_app.Open(ps_file)
 
-        torso_file = cfg[f"torso_{torso_color}"]
-        torso_path = str(TORSO / torso_file)
-        scale = cfg["scale_percent"] / 100
+    def _get_torso_doc(self, torso_path):
+        if torso_path not in self.torso_docs:
+            self.torso_docs[torso_path] = self._open_file(torso_path)
+            hide_ps_window(self.ps_app)
+        return self.torso_docs[torso_path]
 
-        # Trim + 缩放
+    def _prepare_scaled_design(self, inv_path, cfg):
         img = Image.open(inv_path).convert("RGBA")
         a = np.array(img)
         alpha = a[:, :, 3]
         mask = alpha >= ALPHA_THRESHOLD
         ys, xs = np.where(mask)
         if len(ys) == 0:
-            return None
+            raise ValueError(f"无有效像素: {inv_path}")
         x0, x1 = xs.min(), xs.max() + 1
         y0, y1 = ys.min(), ys.max() + 1
         trimmed = img.crop((x0, y0, x1, y1))
+        scale = cfg["scale_percent"] / 100
         new_w = int((x1 - x0) * scale)
         new_h = int((y1 - y0) * scale)
         scaled = trimmed.resize((new_w, new_h), Image.LANCZOS)
 
-        temp_dir = tempfile.gettempdir()
-        temp_design = os.path.join(temp_dir, f"temp_{dx}_inv.png")
-        scaled.save(temp_design, "PNG")
+        torso_name = os.path.splitext(os.path.basename(cfg["torso_black"]))[0]
+        temp_path = os.path.join(self.temp_dir, f"temp_inv_{torso_name}_scaled.png")
+        scaled.save(temp_path, "PNG")
 
         move_x = cfg["target_center_x"] - new_w / 2
         move_y = cfg["target_top_y"]
+        return temp_path, move_x, move_y
 
-        color_suffix = "白T" if torso_color == "white" else "黑T"
+    def _open_design_doc(self, temp_design_path):
+        self._close_design_doc()
+        self.design_doc = self._open_file(temp_design_path)
+        self.design_doc_name = os.path.basename(temp_design_path)
+        hide_ps_window(self.ps_app)
+
+    def _close_design_doc(self):
+        if self.design_doc is not None:
+            try:
+                self.design_doc.Close(2)
+            except Exception:
+                pass
+            self.design_doc = None
+            self.design_doc_name = None
+
+    def place_one(self, side, cfg, inv_path, dx, upload, cut_meta=None):
+        """贴一张黑T。"""
+        temp_design, move_x, move_y = self._prepare_scaled_design(inv_path, cfg)
+        self._open_design_doc(temp_design)
+
+        torso_path = str(TORSO / cfg["torso_black"])
+        torso_doc = self._get_torso_doc(torso_path)
+
+        color_suffix = "黑T"
         output_name = f"{dx}_{side}_{color_suffix}.jpg"
         output_path = str(upload / output_name)
-
-        jsx_path = os.path.join(os.path.dirname(__file__), "jsx", "place_design.jsx")
-        with open(jsx_path, "r", encoding="utf-8") as jf:
-            jsx = jf.read()
-        jsx = jsx.replace("{{TORSO_PATH}}", torso_path.replace("\\", "\\\\"))
-        jsx = jsx.replace("{{DESIGN_PATH}}", temp_design.replace("\\", "\\\\"))
-        jsx = jsx.replace("{{OUTPUT_PATH}}", output_path.replace("\\", "\\\\"))
-        jsx = jsx.replace("{{ROTATION}}", str(cfg["rotation"]))
-        jsx = jsx.replace("{{MOVE_X}}", str(move_x))
-        jsx = jsx.replace("{{MOVE_Y}}", str(move_y))
-
-        temp_jsx = os.path.join(temp_dir, "temp_place.jsx")
-        with open(temp_jsx, "w", encoding="utf-8") as jf:
-            jf.write(jsx)
 
         # 若旧文件存在则先删除，确保 saveAs 直接覆盖不弹窗
         if os.path.exists(output_path):
@@ -147,8 +170,25 @@ def place_one(side, cfg, inv_path, dx, upload, torso_color="black", cut_meta=Non
             except Exception as e:
                 print(f"  ⚠️ 删除旧{output_name}失败: {e}")
 
-        psApp.DoJavaScriptFile(temp_jsx)
-        hide_ps_window(psApp)
+        jsx_path = os.path.join(os.path.dirname(__file__), "jsx", "place_design.jsx")
+        with open(jsx_path, "r", encoding="utf-8") as jf:
+            jsx = jf.read()
+        jsx = jsx.replace("{{DESIGN_DOC_NAME}}", self.design_doc_name)
+        jsx = jsx.replace("{{OUTPUT_PATH}}", output_path.replace("\\", "\\\\"))
+        jsx = jsx.replace("{{ROTATION}}", str(cfg["rotation"]))
+        jsx = jsx.replace("{{MOVE_X}}", str(move_x))
+        jsx = jsx.replace("{{MOVE_Y}}", str(move_y))
+
+        temp_jsx = os.path.join(self.temp_dir, "temp_place.jsx")
+        with open(temp_jsx, "w", encoding="utf-8") as jf:
+            jf.write(jsx)
+
+        t0 = time.time()
+        self.ps_app.ActiveDocument = torso_doc
+        self.ps_app.DoJavaScriptFile(temp_jsx)
+        hide_ps_window(self.ps_app)
+        dt = time.time() - t0
+        print(f"  ✅ {output_name} ({dt:.1f}秒)")
 
         if cut_meta is not None and wb_meta is not None:
             try:
@@ -165,55 +205,46 @@ def place_one(side, cfg, inv_path, dx, upload, torso_color="black", cut_meta=Non
                 print(f"  ⚠️ 元数据注册失败({side}): {e}")
 
         return output_name
-    except Exception as e:
-        print(f"  ❌ PS错误({side},{torso_color}): {e}")
-        return None
-    finally:
-        pythoncom.CoUninitialize()
 
-
-def bw_synth(dx, upload):
-    """BW合成：用PS动作合并B和W"""
-    import win32com.client, pythoncom
-    pythoncom.CoInitialize()
-    try:
-        psApp = win32com.client.Dispatch("Photoshop.Application")
-        hide_ps_window(psApp)
-        psApp.DisplayDialogs = 3
+    def bw_synth(self, dx, upload):
+        """BW合成：用PS动作合并B和W（黑T版）。"""
         b_img = str(upload / f"{dx}_B_黑T.jpg")
         w_img = str(upload / f"{dx}_W_黑T.jpg")
         out_path = str(upload / f"{dx}_黑BW.jpg")
 
-        # 用PS动作合成（和ps_batch.py一致）
-        shell = win32com.client.Dispatch("WScript.Shell")
-        ps_exe = r"D:\Program Files\Adobe Photoshop 2025 v26.0\Adobe Photoshop 2025\Photoshop.exe"
-        # 7 = SW_SHOWMINNOACTIVE：最小化打开，不抢焦点
-        shell.Run(f'"{ps_exe}" "{w_img}" "{b_img}"', 7, False)
-        import time; time.sleep(2)
-        hide_ps_window(psApp)
+        if not os.path.exists(b_img) or not os.path.exists(w_img):
+            return "⏭️ 缺少 B/W 黑T文件，跳过黑BW合成"
 
-        for _ in range(20):
-            if psApp.Documents.Count >= 2: break
-            time.sleep(0.5)
+        b_doc = self._open_file(b_img)
+        w_doc = self._open_file(w_img)
 
-        for i in range(1, psApp.Documents.Count + 1):
-            doc = psApp.Documents(i)
-            if f"_B_黑T" in doc.Name:
-                psApp.ActiveDocument = doc; break
-        psApp.DoAction('黑', '正反图')
+        # 主动轮询等待两个文档都打开
+        t0 = time.time()
+        while self.ps_app.Documents.Count < 2 and time.time() - t0 < 10:
+            time.sleep(0.05)
+        hide_ps_window(self.ps_app)
 
-        jpgOpt = win32com.client.Dispatch("Photoshop.JPEGSaveOptions")
-        jpgOpt.Quality = 12
+        # 激活背面文档并执行动作
+        self.ps_app.ActiveDocument = b_doc
+        self.ps_app.DoAction('黑', '正反图')
+        hide_ps_window(self.ps_app)
+
         if os.path.exists(out_path):
             try:
                 os.remove(out_path)
             except Exception as e:
                 print(f"  ⚠️ 删除旧黑BW失败: {e}")
-        psApp.ActiveDocument.SaveAs(out_path, jpgOpt, True, 2)
-        psApp.ActiveDocument.Close(2)
-        for _ in range(psApp.Documents.Count, 0, -1):
-            try: psApp.Documents(_).Close(2)
-            except: pass
+
+        jpgOpt = win32com.client.Dispatch("Photoshop.JPEGSaveOptions")
+        jpgOpt.Quality = 12
+        self.ps_app.ActiveDocument.SaveAs(out_path, jpgOpt, True, 2)
+
+        # 关闭本次打开的 B/W 文档
+        for doc in (b_doc, w_doc):
+            try:
+                doc.Close(2)
+            except:
+                pass
 
         if wb_meta is not None:
             try:
@@ -231,13 +262,20 @@ def bw_synth(dx, upload):
                     source_uids=[meta_b.get("uid"), meta_w.get("uid")],
                     source_files=[os.path.basename(b_img), os.path.basename(w_img)],
                 )
+                print(f"  BW元数据已注册: {bw_role}")
             except Exception as e:
                 print(f"  ⚠️ 黑BW元数据注册失败: {e}")
 
         return "✅ 黑BW 合成完成"
-    except Exception as e:
-        return f"❌ BW合成错误: {e}"
-    finally:
+
+    def close(self):
+        self._close_design_doc()
+        for doc in list(self.torso_docs.values()):
+            try:
+                doc.Close(2)
+            except:
+                pass
+        self.torso_docs.clear()
         pythoncom.CoUninitialize()
 
 
@@ -271,20 +309,23 @@ def main():
         print("❌ 未找到黑版_cut文件")
         return
 
-    # 贴图：只做黑色胚衣版本
-    print(f"\n--- 贴图 ({len(tasks)}张) ---")
-    for side, cfg, inv_path, meta in tasks:
-        r = place_one(side, cfg, inv_path, dx, upload, "black", cut_meta=meta)
-        if r: print(f"  ✅ {r}")
+    session = BlackStickerSession()
+    try:
+        # 贴图：只做黑色胚衣版本
+        print(f"\n--- 贴图 ({len(tasks)}张) ---")
+        for side, cfg, inv_path, meta in tasks:
+            session.place_one(side, cfg, inv_path, dx, upload, cut_meta=meta)
 
-    # BW合成
-    has_b = any(s == "B" for s, _, _, _ in tasks)
-    has_w = any(s == "W" for s, _, _, _ in tasks)
-    if has_b and has_w:
-        print("\n--- BW合成 ---")
-        print(f"  {bw_synth(dx, upload)}")
-    else:
-        print("⏭️ 只有单面，跳过BW合成")
+        # BW合成
+        has_b = any(s == "B" for s, _, _, _ in tasks)
+        has_w = any(s == "W" for s, _, _, _ in tasks)
+        if has_b and has_w:
+            print("\n--- BW合成 ---")
+            print(f"  {session.bw_synth(dx, upload)}")
+        else:
+            print("⏭️ 只有单面，跳过BW合成")
+    finally:
+        session.close()
 
     dt = time.time() - t0
     print(f"\n⏱️ 总耗时: {dt:.1f}秒")

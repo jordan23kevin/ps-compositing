@@ -1,49 +1,30 @@
-"""黑T贴图处理 v2.2 — 反相完成后调用，PS贴图+BW合成全覆盖
+"""黑T贴图处理 v2.3 — 反相完成后调用，PS贴图+BW合成全覆盖
 
-变更 v2.2：
-  - 单 DX 内复用 Photoshop COM 会话，缓存黑胚衣文档
-  - 用主动轮询替代硬编码 sleep
-  - 与 check_rem.py /invert-rem 联动：反相生成黑版专用图后自动调用本脚本
+变更 v2.3：
+  - 复用 wb_sticker_ps.StickerSession 进行黑T贴图，与通用贴图共享 JSX 路径模板，
+    修复因 {{TORSO_DOC_NAME}} / {{DESIGN_DOC_NAME}} 占位符与 JSX 不匹配导致的执行失败。
+  - BW 合成仍在本脚本内完成，直接操作 StickerSession 的 Photoshop COM 会话。
+  - 单 DX 内只开启一次 Photoshop，全部黑T贴图与 BW 合成完成后才关闭。
 """
 import os, re, sys, tempfile, time
 import win32com.client
-import pythoncom
 from pathlib import Path
-from PIL import Image
-import numpy as np
 
 sys.path.insert(0, r"E:\Claude code\ps")
 try:
     import wb_meta
 except Exception:
     wb_meta = None
-from config import hide_ps_window, parse_side_suffix
+from config import SOURCE_BASE, parse_side_suffix
+from wb_sticker_ps import StickerSession, _role_from_name
 
-ALPHA_THRESHOLD = 20
-BASE = Path(r"D:\Semems WB\02_PROJECTS")
+BASE = Path(SOURCE_BASE)
 TORSO = Path(r"D:\Semems\1胚衣")
 
 # ---------------------------------------------------------------------------
 # 元数据辅助
 # ---------------------------------------------------------------------------
 _MIGRATED_DX = set()
-
-
-def _role_from_name(name):
-    """从文件名推断 role（支持 _cut.png / 上传图 / BW 合成图）"""
-    stem = os.path.splitext(name)[0]
-    if stem.endswith("_cut"):
-        stem = stem[:-4]
-    parts = stem.split("_")
-    if len(parts) >= 3 and parts[-1] in ("白T", "黑T"):
-        side = parts[-2]
-        torso = parts[-1]
-        if torso == "黑T":
-            return f"黑{side}"
-        return side
-    if len(parts) >= 2:
-        return parts[-1]
-    return "?"
 
 
 def _infer_meta(path):
@@ -75,6 +56,7 @@ def _get_meta(path):
         return meta
     return _infer_meta(path)
 
+
 BACK_NEW = {
     "torso_white": "白背2.jpg", "torso_black": "黑背2.jpg",
     "scale_percent": 30, "rotation": -1,
@@ -88,18 +70,12 @@ FRONT_NEW = {
 
 
 # ---------------------------------------------------------------------------
-# Photoshop 会话：单 DX 内复用 COM、缓存黑胚衣文档
+# Photoshop 会话：单 DX 内复用 StickerSession
 # ---------------------------------------------------------------------------
 class BlackStickerSession:
     def __init__(self):
-        pythoncom.CoInitialize()
-        self.ps_app = win32com.client.Dispatch("Photoshop.Application")
-        self.ps_app.DisplayDialogs = 3  # DialogModes.NO
-        hide_ps_window(self.ps_app)
-        self.torso_docs = {}      # torso_path -> doc
-        self.design_doc = None
-        self.design_doc_name = None
-        self.temp_dir = tempfile.gettempdir()
+        # StickerSession 内部已经做了 CoInitialize / PS 启动 / 隐藏窗口
+        self.sticker = StickerSession()
 
     def _open_file(self, file_path):
         """通过 JSX app.open 打开文件，并返回当前活动文档对象。"""
@@ -108,111 +84,18 @@ class BlackStickerSession:
             'var f = new File("' + file_path.replace("\\", "\\\\") + '");\n'
             'app.open(f);\n'
         )
-        temp_jsx = os.path.join(self.temp_dir, f"_open_{doc_name}.jsx")
+        temp_jsx = os.path.join(tempfile.gettempdir(), f"_open_{doc_name}.jsx")
         with open(temp_jsx, "w", encoding="utf-8") as f:
             f.write(jsx)
-        self.ps_app.DoJavaScriptFile(temp_jsx)
-        hide_ps_window(self.ps_app)
-        return self.ps_app.ActiveDocument
-
-    def _get_torso_doc(self, torso_path):
-        if torso_path not in self.torso_docs:
-            self.torso_docs[torso_path] = self._open_file(torso_path)
-            hide_ps_window(self.ps_app)
-        return self.torso_docs[torso_path]
-
-    def _prepare_scaled_design(self, inv_path, cfg):
-        img = Image.open(inv_path).convert("RGBA")
-        a = np.array(img)
-        alpha = a[:, :, 3]
-        mask = alpha >= ALPHA_THRESHOLD
-        ys, xs = np.where(mask)
-        if len(ys) == 0:
-            raise ValueError(f"无有效像素: {inv_path}")
-        x0, x1 = xs.min(), xs.max() + 1
-        y0, y1 = ys.min(), ys.max() + 1
-        trimmed = img.crop((x0, y0, x1, y1))
-        scale = cfg["scale_percent"] / 100
-        new_w = int((x1 - x0) * scale)
-        new_h = int((y1 - y0) * scale)
-        scaled = trimmed.resize((new_w, new_h), Image.LANCZOS)
-
-        torso_name = os.path.splitext(os.path.basename(cfg["torso_black"]))[0]
-        temp_path = os.path.join(self.temp_dir, f"temp_inv_{torso_name}_scaled.png")
-        scaled.save(temp_path, "PNG")
-
-        move_x = cfg["target_center_x"] - new_w / 2
-        move_y = cfg["target_top_y"]
-        return temp_path, move_x, move_y
-
-    def _open_design_doc(self, temp_design_path):
-        self._close_design_doc()
-        self.design_doc = self._open_file(temp_design_path)
-        self.design_doc_name = os.path.basename(temp_design_path)
-        hide_ps_window(self.ps_app)
-
-    def _close_design_doc(self):
-        if self.design_doc is not None:
-            try:
-                self.design_doc.Close(2)
-            except Exception:
-                pass
-            self.design_doc = None
-            self.design_doc_name = None
+        self.sticker.ps_app.DoJavaScriptFile(temp_jsx)
+        return self.sticker.ps_app.ActiveDocument
 
     def place_one(self, side, cfg, inv_path, dx, upload, cut_meta=None):
-        """贴一张黑T。"""
-        temp_design, move_x, move_y = self._prepare_scaled_design(inv_path, cfg)
-        self._open_design_doc(temp_design)
-
-        torso_path = str(TORSO / cfg["torso_black"])
-        torso_doc = self._get_torso_doc(torso_path)
-
-        color_suffix = "黑T"
-        output_name = f"{dx}_{side}_{color_suffix}.jpg"
+        """贴一张黑T：直接复用 StickerSession 的路径模板 JSX。"""
+        output_name = f"{dx}_{side}_黑T.jpg"
         output_path = str(upload / output_name)
-
-        # 若旧文件存在则先删除，确保 saveAs 直接覆盖不弹窗
-        if os.path.exists(output_path):
-            try:
-                os.remove(output_path)
-            except Exception as e:
-                print(f"  ⚠️ 删除旧{output_name}失败: {e}")
-
-        jsx_path = os.path.join(os.path.dirname(__file__), "jsx", "place_design.jsx")
-        with open(jsx_path, "r", encoding="utf-8") as jf:
-            jsx = jf.read()
-        jsx = jsx.replace("{{DESIGN_DOC_NAME}}", self.design_doc_name)
-        jsx = jsx.replace("{{OUTPUT_PATH}}", output_path.replace("\\", "\\\\"))
-        jsx = jsx.replace("{{ROTATION}}", str(cfg["rotation"]))
-        jsx = jsx.replace("{{MOVE_X}}", str(move_x))
-        jsx = jsx.replace("{{MOVE_Y}}", str(move_y))
-
-        temp_jsx = os.path.join(self.temp_dir, "temp_place.jsx")
-        with open(temp_jsx, "w", encoding="utf-8") as jf:
-            jf.write(jsx)
-
-        t0 = time.time()
-        self.ps_app.ActiveDocument = torso_doc
-        self.ps_app.DoJavaScriptFile(temp_jsx)
-        hide_ps_window(self.ps_app)
-        dt = time.time() - t0
-        print(f"  ✅ {output_name} ({dt:.1f}秒)")
-
-        if cut_meta is not None and wb_meta is not None:
-            try:
-                role = _role_from_name(output_name)
-                wb_meta.register_sticker(
-                    output_path,
-                    uid=cut_meta["uid"],
-                    group_id=cut_meta["group_id"],
-                    role=role,
-                    parent_uid=cut_meta["uid"],
-                    cut_file=os.path.basename(inv_path),
-                )
-            except Exception as e:
-                print(f"  ⚠️ 元数据注册失败({side}): {e}")
-
+        torso_path = str(TORSO / cfg["torso_black"])
+        self.sticker.place_design(inv_path, torso_path, output_path, cfg, cut_meta=cut_meta)
         return output_name
 
     def bw_synth(self, dx, upload):
@@ -229,14 +112,12 @@ class BlackStickerSession:
 
         # 主动轮询等待两个文档都打开
         t0 = time.time()
-        while self.ps_app.Documents.Count < 2 and time.time() - t0 < 10:
+        while self.sticker.ps_app.Documents.Count < 2 and time.time() - t0 < 10:
             time.sleep(0.05)
-        hide_ps_window(self.ps_app)
 
         # 激活背面文档并执行动作
-        self.ps_app.ActiveDocument = b_doc
-        self.ps_app.DoAction('黑', '正反图')
-        hide_ps_window(self.ps_app)
+        self.sticker.ps_app.ActiveDocument = b_doc
+        self.sticker.ps_app.DoAction('黑', '正反图')
 
         if os.path.exists(out_path):
             try:
@@ -246,7 +127,7 @@ class BlackStickerSession:
 
         jpgOpt = win32com.client.Dispatch("Photoshop.JPEGSaveOptions")
         jpgOpt.Quality = 12
-        self.ps_app.ActiveDocument.SaveAs(out_path, jpgOpt, True, 2)
+        self.sticker.ps_app.ActiveDocument.SaveAs(out_path, jpgOpt, True, 2)
 
         # 关闭本次打开的 B/W 文档
         for doc in (b_doc, w_doc):
@@ -278,14 +159,7 @@ class BlackStickerSession:
         return "✅ 黑BW 合成完成"
 
     def close(self):
-        self._close_design_doc()
-        for doc in list(self.torso_docs.values()):
-            try:
-                doc.Close(2)
-            except:
-                pass
-        self.torso_docs.clear()
-        pythoncom.CoUninitialize()
+        self.sticker.close()
 
 
 def main():

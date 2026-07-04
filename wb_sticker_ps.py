@@ -1,7 +1,6 @@
 # ===== WB 贴图主控 v2.2 =====
 # 变更 v2.2：
-#   - 单 DX 内复用 Photoshop COM 会话，缓存胚衣文档，减少反复打开/关闭
-#   - 同一设计图按正/背缩放后只打开一次，分别贴到白/黑胚衣
+#   - 单 DX 内复用 Photoshop COM 会话，避免每贴一张图都重新连接 PS
 #   - 黑T优先使用 02_REM_BG 中的 _黑B/_黑W/_黑BW 专用文件
 #   - 检测到黑版专用文件时，通用图不再输出黑T成品，仅输出白T
 import os
@@ -120,122 +119,49 @@ def calculate_sticker_position(png_path):
     }
 
 
-def _prepare_scaled_design(design_path, placement_cfg):
-    """预先 trim + 缩放贴图，返回 (临时文件路径, move_x, move_y)。"""
-    pos = calculate_sticker_position(design_path)
-    scale = placement_cfg["scale_percent"] / 100
-
-    img = Image.open(design_path).convert("RGBA")
-    a = np.array(img)
-    alpha = a[:, :, 3]
-    mask = alpha >= ALPHA_THRESHOLD
-    ys, xs = np.where(mask)
-    if len(ys) == 0:
-        raise ValueError(f"无有效像素: {design_path}")
-
-    x0, x1 = xs.min(), xs.max() + 1
-    y0, y1 = ys.min(), ys.max() + 1
-    trimmed = img.crop((x0, y0, x1, y1))
-    new_w = int((x1 - x0) * scale)
-    new_h = int((y1 - y0) * scale)
-    scaled = trimmed.resize((new_w, new_h), Image.LANCZOS)
-
-    # 用 torso 文件名区分临时文件，避免同进程内冲突
-    torso_name = os.path.splitext(os.path.basename(placement_cfg["torso_white"]))[0]
-    temp_path = os.path.join(tempfile.gettempdir(), f"temp_design_{torso_name}_scaled.png")
-    scaled.save(temp_path, "PNG")
-
-    move_x = placement_cfg["target_center_x"] - new_w / 2
-    move_y = placement_cfg["target_top_y"]
-    return temp_path, move_x, move_y
-
-
 # ---------------------------------------------------------------------------
-# Photoshop 会话：单 DX 内复用 COM、缓存胚衣文档
+# Photoshop 会话：单 DX 内复用 COM
 # ---------------------------------------------------------------------------
 class StickerSession:
     def __init__(self):
         pythoncom.CoInitialize()
         self.ps_app = win32com.client.Dispatch("Photoshop.Application")
-        self.ps_app.DisplayDialogs = 3  # DialogModes.NO
+        self.ps_app.DisplayDialogs = 3  # DialogModes.NO：不弹任何对话框
         config.hide_ps_window(self.ps_app)
-        self.torso_docs = {}      # torso_path -> doc
-        self.design_doc = None    # 当前打开的设计图文档
-        self.design_doc_name = None
         self.temp_dir = tempfile.gettempdir()
 
-    def _open_file(self, file_path):
-        """通过 JSX app.open 打开文件，并返回当前活动文档对象。
-        比 ps_app.Open(File) 更可靠，且能正确获取文档引用。"""
-        doc_name = os.path.basename(file_path)
-        jsx = (
-            'var f = new File("' + file_path.replace("\\", "\\\\") + '");\n'
-            'app.open(f);\n'
-        )
-        temp_jsx = os.path.join(self.temp_dir, f"_open_{doc_name}.jsx")
-        with open(temp_jsx, "w", encoding="utf-8") as f:
-            f.write(jsx)
-        self.ps_app.DoJavaScriptFile(temp_jsx)
-        config.hide_ps_window(self.ps_app)
-        # 打开后当前活动文档即为刚打开的文档
-        return self.ps_app.ActiveDocument
+    def _prepare_scaled_design(self, design_path, placement_cfg):
+        """预先 trim + 缩放贴图，返回 (临时文件路径, move_x, move_y)。"""
+        pos = calculate_sticker_position(design_path)
+        scale = placement_cfg["scale_percent"] / 100
 
-    def _get_torso_doc(self, torso_path):
-        """获取缓存的胚衣文档；没有则打开并缓存。"""
-        if torso_path not in self.torso_docs:
-            doc = self._open_file(torso_path)
-            self.torso_docs[torso_path] = doc
-            config.hide_ps_window(self.ps_app)
-        return self.torso_docs[torso_path]
+        img = Image.open(design_path).convert("RGBA")
+        a = np.array(img)
+        alpha = a[:, :, 3]
+        mask = alpha >= ALPHA_THRESHOLD
+        ys, xs = np.where(mask)
+        if len(ys) == 0:
+            raise ValueError(f"无有效像素: {design_path}")
 
-    def _open_design_doc(self, temp_design_path):
-        """打开一张已缩放的设计图文档。同一时刻只保留一张。"""
-        self._close_design_doc()
-        self.design_doc = self._open_file(temp_design_path)
-        self.design_doc_name = os.path.basename(temp_design_path)
-        config.hide_ps_window(self.ps_app)
+        x0, x1 = xs.min(), xs.max() + 1
+        y0, y1 = ys.min(), ys.max() + 1
+        trimmed = img.crop((x0, y0, x1, y1))
+        new_w = int((x1 - x0) * scale)
+        new_h = int((y1 - y0) * scale)
+        scaled = trimmed.resize((new_w, new_h), Image.LANCZOS)
 
-    def _close_design_doc(self):
-        if self.design_doc is not None:
-            try:
-                self.design_doc.Close(2)
-            except Exception:
-                pass
-            self.design_doc = None
-            self.design_doc_name = None
+        # 用 torso 文件名区分临时文件，避免同进程内冲突
+        torso_name = os.path.splitext(os.path.basename(placement_cfg["torso_white"]))[0]
+        temp_path = os.path.join(self.temp_dir, f"temp_design_{torso_name}_scaled.png")
+        scaled.save(temp_path, "PNG")
+
+        move_x = placement_cfg["target_center_x"] - new_w / 2
+        move_y = placement_cfg["target_top_y"]
+        return temp_path, move_x, move_y
 
     def place_design(self, design_path, torso_path, output_path, placement_cfg, cut_meta=None):
-        """兼容旧接口：单次贴图。会内部打开/关闭设计图。"""
-        temp_design, move_x, move_y = _prepare_scaled_design(design_path, placement_cfg)
-        self._open_design_doc(temp_design)
-        self._place_on_torso(
-            self.design_doc_name,
-            torso_path,
-            output_path,
-            placement_cfg["rotation"],
-            move_x,
-            move_y,
-        )
-        self._close_design_doc()
-        self._register_sticker_meta(design_path, output_path, cut_meta)
-
-    def place_design_cached(self, temp_design_path, torso_path, output_path, rotation, move_x, move_y,
-                            design_path_for_meta=None, output_path_for_meta=None, cut_meta=None):
-        """缓存模式：调用方已打开 design_doc，直接贴到指定胚衣。"""
-        self._place_on_torso(
-            self.design_doc_name,
-            torso_path,
-            output_path,
-            rotation,
-            move_x,
-            move_y,
-        )
-        if design_path_for_meta and output_path_for_meta:
-            self._register_sticker_meta(design_path_for_meta, output_path_for_meta, cut_meta)
-
-    def _place_on_torso(self, design_doc_name, torso_path, output_path, rotation, move_x, move_y):
-        """执行 JSX 将当前设计图贴到指定胚衣并保存。"""
-        torso_doc = self._get_torso_doc(torso_path)
+        """通用贴图函数：JSX 内打开胚衣和设计图，贴图后关闭。"""
+        temp_design, move_x, move_y = self._prepare_scaled_design(design_path, placement_cfg)
 
         # 若旧文件存在则先删除，确保 saveAs 直接覆盖不弹窗
         if os.path.exists(output_path):
@@ -248,9 +174,10 @@ class StickerSession:
         with open(jsx_path, "r", encoding="utf-8") as f:
             jsx_content = f.read()
 
-        jsx_content = jsx_content.replace("{{DESIGN_DOC_NAME}}", design_doc_name)
+        jsx_content = jsx_content.replace("{{TORSO_PATH}}", torso_path.replace("\\", "\\\\"))
+        jsx_content = jsx_content.replace("{{DESIGN_PATH}}", temp_design.replace("\\", "\\\\"))
         jsx_content = jsx_content.replace("{{OUTPUT_PATH}}", output_path.replace("\\", "\\\\"))
-        jsx_content = jsx_content.replace("{{ROTATION}}", str(rotation))
+        jsx_content = jsx_content.replace("{{ROTATION}}", str(placement_cfg["rotation"]))
         jsx_content = jsx_content.replace("{{MOVE_X}}", str(move_x))
         jsx_content = jsx_content.replace("{{MOVE_Y}}", str(move_y))
 
@@ -259,13 +186,11 @@ class StickerSession:
             f.write(jsx_content)
 
         t0 = time.time()
-        self.ps_app.ActiveDocument = torso_doc
         self.ps_app.DoJavaScriptFile(temp_jsx)
         config.hide_ps_window(self.ps_app)
         dt = time.time() - t0
         print(f"✅ 生成: {output_path}  ({dt:.1f}秒)")
 
-    def _register_sticker_meta(self, design_path, output_path, cut_meta):
         if cut_meta is not None and wb_meta is not None:
             try:
                 out_name = os.path.basename(output_path)
@@ -282,24 +207,7 @@ class StickerSession:
                 print(f"  ⚠️ 元数据注册失败: {e}")
 
     def close(self):
-        self._close_design_doc()
-        for doc in list(self.torso_docs.values()):
-            try:
-                doc.Close(2)
-            except Exception:
-                pass
-        self.torso_docs.clear()
         pythoncom.CoUninitialize()
-
-
-# 保持旧接口兼容
-def place_design(design_path, torso_path, output_path, placement_cfg, cut_meta=None):
-    """通用贴图函数（兼容旧接口，内部创建临时 StickerSession）。"""
-    session = StickerSession()
-    try:
-        session.place_design(design_path, torso_path, output_path, placement_cfg, cut_meta=cut_meta)
-    finally:
-        session.close()
 
 
 def classify_design(filename):
@@ -338,38 +246,6 @@ def black_counterpart(file, dx):
     return None
 
 
-def _process_one_design(session, design_path, dx_name, upload_folder, side_cfgs, has_black, cut_meta):
-    """
-    处理一个设计图，按 side_cfgs 列表生成输出。
-    side_cfgs: [(side_label, placement_cfg, torso_color, output_suffix), ...]
-    """
-    # 按 placement_cfg 分组预处理（正/背可能用不同缩放）
-    prepared = {}
-    for side_label, cfg, torso_color, output_suffix in side_cfgs:
-        key = id(cfg)
-        if key not in prepared:
-            prepared[key] = _prepare_scaled_design(design_path, cfg)
-        temp_design, move_x, move_y = prepared[key]
-
-        # 打开（或复用）设计图文档
-        if session.design_doc_name != os.path.basename(temp_design):
-            session._open_design_doc(temp_design)
-
-        torso_path = os.path.join(config.BASE_TORSO, cfg[f"torso_{torso_color}"])
-        output_path = os.path.join(upload_folder, f"{dx_name}_{side_label}_{output_suffix}.jpg")
-        session.place_design_cached(
-            temp_design,
-            torso_path,
-            output_path,
-            cfg["rotation"],
-            move_x,
-            move_y,
-            design_path_for_meta=design_path,
-            output_path_for_meta=output_path,
-            cut_meta=cut_meta,
-        )
-
-
 def process_dx_folder(dx_folder, session=None):
     """处理单个 DX 文件夹，返回耗时（秒）。session 为 None 时内部创建。"""
     dx_name = os.path.basename(dx_folder)
@@ -406,29 +282,77 @@ def process_dx_folder(dx_folder, session=None):
                 print(f"  发现黑版专用 {black_file}，通用图仅用于白T")
 
             if design_type == "BW":
-                # 先生成正面 W，再生成背面 B
-                side_cfgs = [
-                    ("W", config.FRONT_NEW, "white", "白T"),
-                ]
+                # ===== BW 类型：生成 W 和 B 两套文件，供 ps_batch.py 合成 =====
+                print("  → 生成 W 正面文件（新方案）...")
+                session.place_design(
+                    design_path,
+                    os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
+                    os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
+                    config.FRONT_NEW,
+                    cut_meta=cut_meta,
+                )
                 if not has_black:
-                    side_cfgs.append(("W", config.FRONT_NEW, "black", "黑T"))
-                side_cfgs.append(("B", config.BACK_NEW, "white", "白T"))
+                    session.place_design(
+                        design_path,
+                        os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
+                        os.path.join(upload_folder, f"{dx_name}_W_黑T.jpg"),
+                        config.FRONT_NEW,
+                        cut_meta=cut_meta,
+                    )
+
+                print("  → 生成 B 背面文件（新方案）...")
+                session.place_design(
+                    design_path,
+                    os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
+                    os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
+                    config.BACK_NEW,
+                    cut_meta=cut_meta,
+                )
                 if not has_black:
-                    side_cfgs.append(("B", config.BACK_NEW, "black", "黑T"))
-                _process_one_design(session, design_path, dx_name, upload_folder, side_cfgs, has_black, cut_meta)
+                    session.place_design(
+                        design_path,
+                        os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
+                        os.path.join(upload_folder, f"{dx_name}_B_黑T.jpg"),
+                        config.BACK_NEW,
+                        cut_meta=cut_meta,
+                    )
                 print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
 
             elif design_type == "W":
-                side_cfgs = [("W", config.FRONT_NEW, "white", "白T")]
+                # ===== W 类型：正图新方案 =====
+                session.place_design(
+                    design_path,
+                    os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
+                    os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
+                    config.FRONT_NEW,
+                    cut_meta=cut_meta,
+                )
                 if not has_black:
-                    side_cfgs.append(("W", config.FRONT_NEW, "black", "黑T"))
-                _process_one_design(session, design_path, dx_name, upload_folder, side_cfgs, has_black, cut_meta)
+                    session.place_design(
+                        design_path,
+                        os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
+                        os.path.join(upload_folder, f"{dx_name}_W_黑T.jpg"),
+                        config.FRONT_NEW,
+                        cut_meta=cut_meta,
+                    )
 
             elif design_type == "B":
-                side_cfgs = [("B", config.BACK_NEW, "white", "白T")]
+                # ===== B 类型：背图新方案 =====
+                session.place_design(
+                    design_path,
+                    os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
+                    os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
+                    config.BACK_NEW,
+                    cut_meta=cut_meta,
+                )
                 if not has_black:
-                    side_cfgs.append(("B", config.BACK_NEW, "black", "黑T"))
-                _process_one_design(session, design_path, dx_name, upload_folder, side_cfgs, has_black, cut_meta)
+                    session.place_design(
+                        design_path,
+                        os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
+                        os.path.join(upload_folder, f"{dx_name}_B_黑T.jpg"),
+                        config.BACK_NEW,
+                        cut_meta=cut_meta,
+                    )
 
         dt_dx = time.time() - t_dx
         print(f"⏱️  {dx_name} 完成，耗时 {dt_dx:.1f}秒")

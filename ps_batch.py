@@ -1,9 +1,11 @@
 # ===== PS 正反图批处理 v1.3.0 =====
-# 变更 v1.3.0：Photoshop 窗口全程最小化/隐藏，不抢焦点
+# 变更 v1.3.0：Photoshop 窗口可见并最小化，方便观察任务进度
 # 直读03_UPLOAD贴图结果，直写03_UPLOAD BW合成图
 import io, win32com.client, os, time, sys
 from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+import config
 
 BASE = r"D:\Semems WB\02_PROJECTS"
 PS_EXE = r"D:\Program Files\Adobe Photoshop 2025 v26.0\Adobe Photoshop 2025\Photoshop.exe"
@@ -116,8 +118,7 @@ def process_color(dx_folder, color, action_name, output_name):
         return False
 
     if os.path.exists(out_path):
-        log(f"  跳过{color}：{output_name}已存在")
-        return False
+        log(f"  覆盖{color}：{output_name}已存在，将重新生成")
 
     log(f"  打开正背两张...")
     try:
@@ -127,10 +128,8 @@ def process_color(dx_folder, color, action_name, output_name):
         pass
     ps_open_both(back_img, front_img)
     ps = wait_ps_docs(2)
-    try:
-        ps.Visible = False
-    except Exception:
-        pass
+    ps.DisplayDialogs = 3  # DialogModes.NO：不弹任何对话框
+    config.hide_ps_window(ps)
     log(f"  已打开 {ps.Documents.Count} 个文档")
 
     for i in range(1, ps.Documents.Count + 1):
@@ -142,9 +141,13 @@ def process_color(dx_folder, color, action_name, output_name):
 
     ps.DoAction(action_name, '正反图')
     log(f"  动作: 正反图 > {action_name}")
+    config.hide_ps_window(ps)
 
     if os.path.exists(out_path):
-        os.remove(out_path)
+        try:
+            os.remove(out_path)
+        except Exception as e:
+            log(f"  删除旧{output_name}失败: {e}")
 
     export_opts = win32com.client.Dispatch('Photoshop.ExportOptionsSaveForWeb')
     export_opts.Format = 6
@@ -152,6 +155,7 @@ def process_color(dx_folder, color, action_name, output_name):
     export_opts.Optimized = True
 
     ps.ActiveDocument.Export(ExportIn=out_path, ExportAs=2, Options=export_opts)
+    config.hide_ps_window(ps)
     size = os.path.getsize(out_path)
     log(f"  OK: {output_name} ({size/1024:.0f}KB)")
 

@@ -371,6 +371,7 @@ def reconcile_file(dx_dir: str | Path, path: str | Path) -> Optional[dict]:
 
 def reconcile_dx(dx_dir: str | Path) -> Dict[str, int]:
     """扫描 DX 下所有图片，用 MD5 修正 uid_map 中的路径。
+    优化：每个 DX 只读一次 uid_map，按路径快速匹配；只有路径找不到时才算 MD5。
     返回统计：{'found': N, 'updated': N, 'missing': N}
     """
     dx_dir = Path(dx_dir)
@@ -381,6 +382,17 @@ def reconcile_dx(dx_dir: str | Path) -> Dict[str, int]:
         "sticker": dx_dir / "03_UPLOAD",
     }
 
+    data = read_uid_map(dx_dir)
+    images = data.get("images", {})
+    md5_index = data.get("md5_index", {})
+    # 路径 -> uid 快速索引
+    path_to_uid = {}
+    for uid, entry in images.items():
+        rel = entry.get("file")
+        if rel:
+            path_to_uid[rel] = uid
+
+    changed = False
     for stage, dir_path in stages.items():
         if not dir_path.exists():
             continue
@@ -389,17 +401,41 @@ def reconcile_dx(dx_dir: str | Path) -> Dict[str, int]:
                 continue
             if f.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
                 continue
-            entry = reconcile_file(dx_dir, f)
-            if entry:
-                stats["found"] += 1
-                if entry.get("stage") != stage:
-                    # stage 变了也同步
-                    data = read_uid_map(dx_dir)
-                    data["images"][entry["uid"]]["stage"] = stage
-                    write_uid_map(dx_dir, data)
-                    stats["updated"] += 1
-            else:
+            try:
+                rel = str(f.relative_to(dx_dir))
+            except ValueError:
+                rel = str(f.name)
+
+            uid = path_to_uid.get(rel)
+            entry = images.get(uid) if uid else None
+            if entry is None:
+                # 路径对不上，用 MD5 找回旧记录
+                md5 = compute_md5(f)
+                uid = md5_index.get(md5)
+                if uid:
+                    entry = images.get(uid)
+                    if entry is not None:
+                        old_rel = entry.get("file")
+                        if old_rel and old_rel in path_to_uid:
+                            del path_to_uid[old_rel]
+                        entry["file"] = rel
+                        entry["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        path_to_uid[rel] = uid
+                        stats["updated"] += 1
+                        changed = True
+
+            if entry is None:
                 stats["missing"] += 1
+                continue
+
+            stats["found"] += 1
+            if entry.get("stage") != stage:
+                entry["stage"] = stage
+                stats["updated"] += 1
+                changed = True
+
+    if changed:
+        write_uid_map(dx_dir, data)
     return stats
 
 

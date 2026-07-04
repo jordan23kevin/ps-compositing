@@ -1,7 +1,7 @@
 """黑T贴图处理 v2.1 — 反相完成后调用，PS贴图+BW合成全覆盖
 
 变更 v2.1：
-  - Photoshop 窗口全程隐藏（psApp.Visible = False），不抢焦点
+  - Photoshop 窗口可见并最小化（psApp.Visible = True），方便观察任务进度
   - 与 check_rem.py /invert-rem 联动：反相生成黑版专用图后自动调用本脚本
 """
 import os, re, sys, tempfile, time
@@ -14,6 +14,7 @@ try:
     import wb_meta
 except Exception:
     wb_meta = None
+from config import hide_ps_window, parse_side_suffix
 
 ALPHA_THRESHOLD = 20
 BASE = Path(r"D:\Semems WB\02_PROJECTS")
@@ -73,12 +74,12 @@ def _get_meta(path):
 
 BACK_NEW = {
     "torso_white": "白背2.jpg", "torso_black": "黑背2.jpg",
-    "scale_percent": 30, "rotation": 1,
+    "scale_percent": 30, "rotation": -1,
     "target_center_x": 680, "target_top_y": 570,
 }
 FRONT_NEW = {
     "torso_white": "白正2.jpg", "torso_black": "黑正2.jpg",
-    "scale_percent": 13.33, "rotation": 1,
+    "scale_percent": 13.33, "rotation": -1,
     "target_center_x": 888, "target_top_y": 612,
 }
 
@@ -92,10 +93,7 @@ def place_one(side, cfg, inv_path, dx, upload, torso_color="black", cut_meta=Non
     pythoncom.CoInitialize()
     try:
         psApp = win32com.client.Dispatch("Photoshop.Application")
-        try:
-            psApp.Visible = False
-        except Exception:
-            pass
+        hide_ps_window(psApp)
         psApp.DisplayDialogs = 3
 
         torso_file = cfg[f"torso_{torso_color}"]
@@ -141,7 +139,16 @@ def place_one(side, cfg, inv_path, dx, upload, torso_color="black", cut_meta=Non
         temp_jsx = os.path.join(temp_dir, "temp_place.jsx")
         with open(temp_jsx, "w", encoding="utf-8") as jf:
             jf.write(jsx)
+
+        # 若旧文件存在则先删除，确保 saveAs 直接覆盖不弹窗
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except Exception as e:
+                print(f"  ⚠️ 删除旧{output_name}失败: {e}")
+
         psApp.DoJavaScriptFile(temp_jsx)
+        hide_ps_window(psApp)
 
         if cut_meta is not None and wb_meta is not None:
             try:
@@ -171,10 +178,7 @@ def bw_synth(dx, upload):
     pythoncom.CoInitialize()
     try:
         psApp = win32com.client.Dispatch("Photoshop.Application")
-        try:
-            psApp.Visible = False
-        except Exception:
-            pass
+        hide_ps_window(psApp)
         psApp.DisplayDialogs = 3
         b_img = str(upload / f"{dx}_B_黑T.jpg")
         w_img = str(upload / f"{dx}_W_黑T.jpg")
@@ -183,8 +187,10 @@ def bw_synth(dx, upload):
         # 用PS动作合成（和ps_batch.py一致）
         shell = win32com.client.Dispatch("WScript.Shell")
         ps_exe = r"D:\Program Files\Adobe Photoshop 2025 v26.0\Adobe Photoshop 2025\Photoshop.exe"
-        shell.Run(f'"{ps_exe}" "{w_img}" "{b_img}"', 1, False)
+        # 7 = SW_SHOWMINNOACTIVE：最小化打开，不抢焦点
+        shell.Run(f'"{ps_exe}" "{w_img}" "{b_img}"', 7, False)
         import time; time.sleep(2)
+        hide_ps_window(psApp)
 
         for _ in range(20):
             if psApp.Documents.Count >= 2: break
@@ -198,6 +204,11 @@ def bw_synth(dx, upload):
 
         jpgOpt = win32com.client.Dispatch("Photoshop.JPEGSaveOptions")
         jpgOpt.Quality = 12
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except Exception as e:
+                print(f"  ⚠️ 删除旧黑BW失败: {e}")
         psApp.ActiveDocument.SaveAs(out_path, jpgOpt, True, 2)
         psApp.ActiveDocument.Close(2)
         for _ in range(psApp.Documents.Count, 0, -1):
@@ -240,18 +251,21 @@ def main():
     upload = BASE / dx / "03_UPLOAD"
     rembg = BASE / dx / "02_REM_BG"
 
-    # 找黑版文件
+    # 找黑版文件（支持版本号后缀：黑B2 / 黑W1 / 黑BW3 等）
     tasks = []
     for inv_path in sorted(rembg.glob(f"{dx}_黑*_cut.png")):
         letter = Path(inv_path).stem.replace(f"{dx}_黑", "").replace("_cut", "")
+        side, version = parse_side_suffix(letter)
         meta = _get_meta(str(inv_path))
-        if letter == "B":
+        if side == "B":
             tasks.append(("B", BACK_NEW, inv_path, meta))
-        elif letter == "W":
+        elif side == "W":
             tasks.append(("W", FRONT_NEW, inv_path, meta))
-        elif letter == "WB" or letter == "BW":
+        elif side == "WB" or side == "BW":
             tasks.append(("B", BACK_NEW, inv_path, meta))
             tasks.append(("W", FRONT_NEW, inv_path, meta))
+        else:
+            print(f"  ⚠️ 跳过无法识别的黑版文件: {inv_path.name}")
 
     if not tasks:
         print("❌ 未找到黑版_cut文件")

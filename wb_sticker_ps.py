@@ -2,10 +2,11 @@
 # 变更 v2.1：
 #   - 黑T优先使用 02_REM_BG 中的 _黑B/_黑W/_黑BW 专用文件
 #   - 检测到黑版专用文件时，通用图不再输出黑T成品，仅输出白T
-#   - Photoshop 窗口全程隐藏，不抢焦点
+#   - Photoshop 窗口可见并最小化，方便观察任务进度
 import os
 import re
 import sys
+import io
 import time
 import win32com.client
 import pythoncom
@@ -14,6 +15,9 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 import config
+
+# 确保 Windows 控制台能输出中文/emoji
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 sys.path.insert(0, r"E:\Claude code\ps")
 try:
@@ -127,10 +131,8 @@ def place_design(design_path, torso_path, output_path, placement_cfg, cut_meta=N
     pythoncom.CoInitialize()
     try:
         psApp = win32com.client.Dispatch("Photoshop.Application")
-        try:
-            psApp.Visible = False
-        except Exception:
-            pass
+        psApp.DisplayDialogs = 3  # DialogModes.NO：不弹任何对话框
+        config.hide_ps_window(psApp)
         t0 = time.time()
 
         # 计算贴图位置（用于trim和缩放）
@@ -182,7 +184,15 @@ def place_design(design_path, torso_path, output_path, placement_cfg, cut_meta=N
         with open(temp_jsx, "w", encoding="utf-8") as f:
             f.write(jsx_content)
 
+        # 若旧文件存在则先删除，确保 saveAs 直接覆盖不弹窗
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except Exception as e:
+                print(f"  ⚠️ 删除旧{os.path.basename(output_path)}失败: {e}")
+
         psApp.DoJavaScriptFile(temp_jsx)
+        config.hide_ps_window(psApp)
         dt = time.time() - t0
         print(f"✅ 生成: {output_path}  ({dt:.1f}秒)")
 
@@ -233,16 +243,15 @@ def classify_design(filename):
 
 def black_counterpart(file, dx):
     """返回通用_cut文件对应的黑版专用文件名（如 DX_B_cut.png → DX_黑B_cut.png）。
+    支持版本号后缀：DX_B2_cut.png → DX_黑B2_cut.png。
     不存在对应关系时返回 None。"""
     if "_黑" in file or not file.lower().endswith("_cut.png"):
         return None
-    stem = file[:-len("_cut.png")]  # e.g. DXxxxx_B 或 DXxxxx_BW
-    if stem == f"{dx}_BW":
-        return f"{dx}_黑BW_cut.png"
-    if stem == f"{dx}_B":
-        return f"{dx}_黑B_cut.png"
-    if stem == f"{dx}_W":
-        return f"{dx}_黑W_cut.png"
+    stem = file[:-len("_cut.png")]  # e.g. DXxxxx_B / DXxxxx_BW / DXxxxx_B2
+    suffix = stem[len(dx)+1:] if stem.startswith(dx + "_") else ""
+    side, version = config.parse_side_suffix(suffix)
+    if side in ("B", "W", "BW", "WB"):
+        return f"{dx}_黑{side}{version}_cut.png"
     return None
 
 

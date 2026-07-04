@@ -1,4 +1,5 @@
 """WB贴图 PS 配置 — 路径、坐标、缩放、旋转"""
+import re
 
 # 胚衣路径
 BASE_TORSO = r"D:\Semems\1胚衣"
@@ -21,7 +22,7 @@ BACK_NEW = {
     "torso_white": "白背2.jpg",
     "torso_black": "黑背2.jpg",
     "scale_percent": 30,      # 缩放30%
-    "rotation": 1,            # 向右旋转1°
+    "rotation": -1,           # 向左旋转1°（逆时针）
     "target_center_x": 680,   # 贴图中心点目标X
     "target_top_y": 570,      # 贴图最高有效像素目标Y
 }
@@ -36,7 +37,7 @@ FRONT_NEW = {
     "torso_white": "白正2.jpg",
     "torso_black": "黑正2.jpg",
     "scale_percent": 13.33,    # 实测等效于手动置入后设10%
-    "rotation": 1,            # 向右旋转1°
+    "rotation": -1,           # 向左旋转1°（逆时针）
     "target_center_x": 888,   # 贴图中心点目标X
     "target_top_y": 612,      # 贴图最高有效像素目标Y
 }
@@ -60,6 +61,90 @@ FRONT = {
     "center_y": 600,
     "rotation": 0,
 }
+
+def _find_ps_hwnd():
+    """查找 Photoshop 主窗口句柄。"""
+    try:
+        import win32gui
+        hwnd = win32gui.FindWindow("Photoshop", None)
+        if hwnd:
+            return hwnd
+        # fallback：枚举可见窗口，标题含 Photoshop
+        handles = []
+        def _enum(hwnd, extra):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd)
+                if "Photoshop" in title:
+                    extra.append(hwnd)
+        win32gui.EnumWindows(_enum, handles)
+        return handles[0] if handles else 0
+    except Exception:
+        return 0
+
+
+def show_ps_minimized(ps_app=None):
+    """让 Photoshop 窗口可见并最小化到任务栏，全程保持最小化。
+    如果窗口已经存在且已最小化，则不再重复设置 Visible（避免把窗口恢复出来）。
+    ps_app: 已获取的 Photoshop COM Application 对象（可选）"""
+    try:
+        import win32gui
+        import win32con
+        hwnd = _find_ps_hwnd()
+        if hwnd and win32gui.IsIconic(hwnd):
+            # 已经最小化，不要再次 Visible=True，否则会把窗口 restore 出来
+            return
+        if hwnd and not win32gui.IsIconic(hwnd):
+            # 窗口已存在但没最小化，直接最小化
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            return
+        # 没有窗口：让 COM 创建窗口并最小化
+        if ps_app is not None:
+            ps_app.Visible = True
+        import time
+        time.sleep(0.3)
+        hwnd = _find_ps_hwnd()
+        if hwnd:
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+    except Exception:
+        pass
+
+
+def hide_ps_window(ps_app=None):
+    """让 Photoshop 主窗口完全隐藏（后台运行，不显示在屏幕/任务栏）。
+    适合配合 Web 页面状态摘要使用。
+    ps_app: 已获取的 Photoshop COM Application 对象（可选）"""
+    try:
+        import win32gui
+        import win32con
+        hwnd = _find_ps_hwnd()
+        if hwnd:
+            win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+            return
+        # 没有窗口：让 COM 创建窗口后再隐藏
+        if ps_app is not None:
+            ps_app.Visible = True
+        import time
+        time.sleep(0.3)
+        hwnd = _find_ps_hwnd()
+        if hwnd:
+            win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+    except Exception:
+        pass
+
+
+# 文件名后缀解析：支持版本号，如 B2 / W1 / BW3 / WB2
+_SIDE_RE = re.compile(r'^(BW|WB|B|W)(\d*)$', re.IGNORECASE)
+
+
+def parse_side_suffix(suffix):
+    """解析去背图后缀中的正反面与版本号。
+    例如：'B2' -> ('B', '2')；'BW' -> ('BW', '')；'WB1' -> ('WB', '1')。
+    无法解析时返回 (None, None)。"""
+    m = _SIDE_RE.match(str(suffix))
+    if not m:
+        return None, None
+    return m.group(1).upper(), m.group(2)
+
 
 # 分类逻辑
 def get_type(filename):

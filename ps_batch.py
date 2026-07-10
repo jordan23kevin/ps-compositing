@@ -1,4 +1,4 @@
-# ===== PS 正反图批处理 v1.4.0 =====
+# ===== PS 正反图批处理 v1.4.1 =====
 # 变更 v1.4.0：
 #   - 整个批次复用同一个 Photoshop COM 会话
 #   - 每个 DX 一次打开 B/W 正背图，连续执行白/黑动作后统一关闭
@@ -17,6 +17,10 @@ try:
     import wb_meta
 except Exception:
     wb_meta = None
+try:
+    from wb_sticker_ps import real_sides
+except Exception:
+    real_sides = None
 
 # ---------------------------------------------------------------------------
 # 元数据辅助
@@ -168,6 +172,17 @@ def process_dx(ps, dx_folder):
     """处理单个 DX 的 BW 合成（白T + 黑T）。"""
     upload = os.path.join(BASE, dx_folder, "03_UPLOAD")
 
+    # 单面款（02_REM_BG 只有 B 或只有 W）不该合成 BW 平铺图：
+    # 拦截并清掉旧 _白BW/_黑BW 残留，避免“新单面图 + 旧互补面图”被误拼成平铺。
+    single_side = None
+    if real_sides is not None:
+        try:
+            sides = real_sides(os.path.join(BASE, dx_folder))
+            if sides in ({"B"}, {"W"}):
+                single_side = next(iter(sides))
+        except Exception as e:
+            log(f"  ⚠️ real_sides 解析失败: {e}")
+
     colors = [
         ("白T", "白", f"{dx_folder}_白BW.jpg"),
         ("黑T", "黑", f"{dx_folder}_黑BW.jpg"),
@@ -178,6 +193,18 @@ def process_dx(ps, dx_folder):
         back_img = os.path.join(upload, f"{dx_folder}_B_{color}.jpg")
         front_img = os.path.join(upload, f"{dx_folder}_W_{color}.jpg")
         out_path = os.path.join(upload, output_name)
+
+        if single_side is not None:
+            if os.path.exists(out_path):
+                try:
+                    os.remove(out_path)
+                    log(f"  🧹 单面款({single_side})删除残留平铺: {output_name}")
+                except Exception as e:
+                    log(f"  ⚠️ 删除{output_name}失败: {e}")
+            else:
+                log(f"  跳过{color}：单面款({single_side})不合成BW")
+            results.append((color, False))
+            continue
 
         if not os.path.exists(back_img) or not os.path.exists(front_img):
             log(f"  跳过{color}：缺少 {dx_folder}_B/W_{color}.jpg")

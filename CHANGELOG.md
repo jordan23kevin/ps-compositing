@@ -1,5 +1,22 @@
 # CHANGELOG — PS 贴图流水线
 
+## v2.4 — 2026-07-10
+
+### 新增：单面款旧产物兜底清理（配合 04_OS check_rem v2.2.7 分流修复）
+
+- `wb_sticker_ps.py` v2.3
+  - 新增 `real_sides(dx_folder)`：遍历 `02_REM_BG/*_cut.png`，去掉 `黑`/`白` 前缀后解析 `B/W/BW/WB`（`BW/WB` 展开为 `B+W`），返回真实面集合。
+  - 新增 `cleanup_stale_uploads(dx_folder)`：当真实面严格为 `{B}` 或 `{W}`（单面款）时，清理 `03_UPLOAD` 中已不存在的互补面胚衣图（`_W_白T/_W_黑T` 或 `_B_*`）与旧 BW 平铺图（`_白BW/_黑BW`）。双面款/未知不动。
+  - `process_dx_folder()` 开头调用 `cleanup_stale_uploads()`。
+- `process_black.py` v2.4 / `process_white.py` v1.1
+  - 入口 `main()` 同样调用 `cleanup_stale_uploads()`（直接跑黑/白版专用贴图时也生效）。
+- `ps_batch.py` v1.4.1
+  - `process_dx()` 合成 BW 前对单面款跳过并删除残留 `_白BW/_黑BW` 平铺图（防止「新单面图 + 旧互补面图」被误拼成平铺）。
+
+### 背景
+
+- 04_OS `check_rem.py` v2.2.7 已让单面款改走模特图贴图（不再进本平铺流程），本仓的清理作为「直接跑 PS 脚本 / 历史残留」场景的兜底。
+
 ## v2.3 — 2026-07-04
 
 ### 修复：黑T贴图失败导致 03_UPLOAD 无输出

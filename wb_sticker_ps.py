@@ -1,4 +1,4 @@
-# ===== WB 贴图主控 v2.2 =====
+# ===== WB 贴图主控 v2.3 =====
 # 变更 v2.2：
 #   - 单 DX 内复用 Photoshop COM 会话，避免每贴一张图都重新连接 PS
 #   - 黑T优先使用 02_REM_BG 中的 _黑B/_黑W/_黑BW 专用文件
@@ -246,6 +246,89 @@ def black_counterpart(file, dx):
     return None
 
 
+def white_counterpart(file, dx):
+    """返回通用_cut文件对应的白版专用文件名（如 DX_B_cut.png → DX_白B_cut.png）。
+    支持版本号后缀：DX_B2_cut.png → DX_白B2_cut.png。
+    不存在对应关系时返回 None。"""
+    if "_白" in file or not file.lower().endswith("_cut.png"):
+        return None
+    stem = file[:-len("_cut.png")]
+    suffix = stem[len(dx)+1:] if stem.startswith(dx + "_") else ""
+    side, version = config.parse_side_suffix(suffix)
+    if side in ("B", "W", "BW", "WB"):
+        return f"{dx}_白{side}{version}_cut.png"
+    return None
+
+
+_SIDE_RE = re.compile(r'^(BW|WB|B|W)(\d*)$', re.IGNORECASE)
+
+
+def real_sides(dx_folder):
+    """解析 02_REM_BG 全部 _cut.png（含 _黑/_白 专用），返回该 DX 真实拥有的面集合。
+
+    - 去掉 黑/白 前缀后解析 side；BW/WB 展开为 {B, W}。
+    - 例如只有 DX_W_cut.png + DX_黑W_cut.png → {'W'}（单面 W）。
+    """
+    sides = set()
+    rem_bg = os.path.join(dx_folder, "02_REM_BG")
+    if not os.path.isdir(rem_bg):
+        return sides
+    dx = os.path.basename(dx_folder)
+    prefix = dx + "_"
+    for fn in os.listdir(rem_bg):
+        if not fn.lower().endswith("_cut.png"):
+            continue
+        stem = os.path.splitext(fn)[0][:-4]  # 去掉 _cut
+        if not stem.startswith(prefix):
+            continue
+        suffix = stem[len(prefix):]
+        if suffix.startswith("黑") or suffix.startswith("白"):
+            suffix = suffix[1:]
+        m = _SIDE_RE.match(suffix)
+        side = m.group(1).upper() if m else None
+        if side in ("BW", "WB"):
+            sides.update(("B", "W"))
+        elif side in ("B", "W"):
+            sides.add(side)
+    return sides
+
+
+def cleanup_stale_uploads(dx_folder):
+    """单面款（只有 B 或只有 W）：清理 03_UPLOAD 中已不属于本款真实面的旧产物。
+
+    旧款从双面改成单面后，旧互补面胚衣图（_W_白T/_W_黑T 或 _B_*）和旧 BW 平铺图
+    （_白BW/_黑BW）会残留在 03_UPLOAD，导致 ps_batch 误把"新单面 + 旧互补面"当成
+    完整 B+W 合成平铺图。本函数在每个贴图入口开头调用，按 02_REM_BG 真实面数清理。
+
+    仅当真实面严格为 {'B'} 或 {'W'} 时清理；双面（含 BW/WB 或 B+W）/空/未知不动。
+    返回实际删除的文件名列表。
+    """
+    sides = real_sides(dx_folder)
+    if sides not in ({"B"}, {"W"}):
+        return []
+    dx = os.path.basename(dx_folder)
+    upload = os.path.join(dx_folder, "03_UPLOAD")
+    if not os.path.isdir(upload):
+        return []
+    missing_side = "W" if sides == {"B"} else "B"
+    candidates = [
+        f"{dx}_白BW.jpg", f"{dx}_黑BW.jpg",
+        f"{dx}_{missing_side}_白T.jpg", f"{dx}_{missing_side}_黑T.jpg",
+    ]
+    removed = []
+    for name in candidates:
+        fp = os.path.join(upload, name)
+        if os.path.exists(fp):
+            try:
+                os.remove(fp)
+                removed.append(name)
+            except Exception as e:
+                print(f"  ⚠️ 清理残留失败 {name}: {e}")
+    if removed:
+        print(f"  🧹 单面款({''.join(sorted(sides))})清理旧互补面/平铺残留: {removed}")
+    return removed
+
+
 def process_dx_folder(dx_folder, session=None):
     """处理单个 DX 文件夹，返回耗时（秒）。session 为 None 时内部创建。"""
     dx_name = os.path.basename(dx_folder)
@@ -256,6 +339,8 @@ def process_dx_folder(dx_folder, session=None):
         return 0.0
 
     os.makedirs(upload_folder, exist_ok=True)
+    # 单面款贴图前先清理 03_UPLOAD 中已不存在的互补面/平铺旧残留
+    cleanup_stale_uploads(dx_folder)
     own_session = session is None
     if own_session:
         session = StickerSession()
@@ -266,8 +351,8 @@ def process_dx_folder(dx_folder, session=None):
             # 只处理 _cut.png 文件，跳过其他（如 DXxxxx_B.png）
             if not file.lower().endswith("_cut.png"):
                 continue
-            # 跳过黑版（反相生成的文件，含_黑），黑T贴图由 process_black.py 处理
-            if "_黑" in file:
+            # 跳过黑版/白版专用文件，它们分别由 process_black.py / process_white.py 处理
+            if "_黑" in file or "_白" in file:
                 continue
 
             print(f"\n处理: {file}")
@@ -279,18 +364,25 @@ def process_dx_folder(dx_folder, session=None):
             black_file = black_counterpart(file, dx_name)
             has_black = black_file and os.path.exists(os.path.join(rem_bg_folder, black_file))
             if has_black:
-                print(f"  发现黑版专用 {black_file}，通用图仅用于白T")
+                print(f"  发现黑版专用 {black_file}，通用图不输出黑T")
+
+            # 如果存在对应的白版专用文件，则通用图不再用于白T
+            white_file = white_counterpart(file, dx_name)
+            has_white = white_file and os.path.exists(os.path.join(rem_bg_folder, white_file))
+            if has_white:
+                print(f"  发现白版专用 {white_file}，通用图不输出白T")
 
             if design_type == "BW":
                 # ===== BW 类型：生成 W 和 B 两套文件，供 ps_batch.py 合成 =====
-                print("  → 生成 W 正面文件（新方案）...")
-                session.place_design(
-                    design_path,
-                    os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
-                    os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
-                    config.FRONT_NEW,
-                    cut_meta=cut_meta,
-                )
+                if not has_white:
+                    print("  → 生成 W 正面文件（新方案）...")
+                    session.place_design(
+                        design_path,
+                        os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
+                        os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
+                        config.FRONT_NEW,
+                        cut_meta=cut_meta,
+                    )
                 if not has_black:
                     session.place_design(
                         design_path,
@@ -300,14 +392,15 @@ def process_dx_folder(dx_folder, session=None):
                         cut_meta=cut_meta,
                     )
 
-                print("  → 生成 B 背面文件（新方案）...")
-                session.place_design(
-                    design_path,
-                    os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
-                    os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
-                    config.BACK_NEW,
-                    cut_meta=cut_meta,
-                )
+                if not has_white:
+                    print("  → 生成 B 背面文件（新方案）...")
+                    session.place_design(
+                        design_path,
+                        os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
+                        os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
+                        config.BACK_NEW,
+                        cut_meta=cut_meta,
+                    )
                 if not has_black:
                     session.place_design(
                         design_path,
@@ -320,13 +413,14 @@ def process_dx_folder(dx_folder, session=None):
 
             elif design_type == "W":
                 # ===== W 类型：正图新方案 =====
-                session.place_design(
-                    design_path,
-                    os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
-                    os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
-                    config.FRONT_NEW,
-                    cut_meta=cut_meta,
-                )
+                if not has_white:
+                    session.place_design(
+                        design_path,
+                        os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
+                        os.path.join(upload_folder, f"{dx_name}_W_白T.jpg"),
+                        config.FRONT_NEW,
+                        cut_meta=cut_meta,
+                    )
                 if not has_black:
                     session.place_design(
                         design_path,
@@ -338,13 +432,14 @@ def process_dx_folder(dx_folder, session=None):
 
             elif design_type == "B":
                 # ===== B 类型：背图新方案 =====
-                session.place_design(
-                    design_path,
-                    os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
-                    os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
-                    config.BACK_NEW,
-                    cut_meta=cut_meta,
-                )
+                if not has_white:
+                    session.place_design(
+                        design_path,
+                        os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
+                        os.path.join(upload_folder, f"{dx_name}_B_白T.jpg"),
+                        config.BACK_NEW,
+                        cut_meta=cut_meta,
+                    )
                 if not has_black:
                     session.place_design(
                         design_path,

@@ -1,4 +1,8 @@
-# ===== PS 正反图批处理 v1.4.1 =====
+# ===== PS 正反图批处理 v1.5 =====
+# 变更 v1.5：
+#   - 将 BW 合成从 Photoshop 动作集「正反图」改为 PIL 直拼，
+#     消除对私有 PS 动作集（白T/黑T）的依赖。新 PS 安装/迁移后动作集
+#     丢失也不会导致 BW 合成失败。
 # 变更 v1.4.0：
 #   - 整个批次复用同一个 Photoshop COM 会话
 #   - 每个 DX 一次打开 B/W 正背图，连续执行白/黑动作后统一关闭
@@ -6,7 +10,11 @@
 # 直读03_UPLOAD贴图结果，直写03_UPLOAD BW合成图
 import io, win32com.client, pythoncom, os, time, sys, tempfile
 from pathlib import Path
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from PIL import Image, ImageDraw, ImageFilter
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 
 import config
 
@@ -159,6 +167,57 @@ def register_bw_meta(back_img, front_img, out_path):
         log(f"  BW元数据注册失败: {e}")
 
 
+def compose_bw_pil(front_path, back_path, out_path,
+                   inset_ratio=0.36, center_x_ratio=0.80, center_y_ratio=0.84,
+                   shadow_offset=(8, 8), shadow_blur=12, shadow_opacity=0.35):
+    """用 PIL 将正面图以圆形插图形式合成到背面图右下角，不依赖 PS 动作集。
+
+    复刻原「正反图」动作集效果：
+      - 背面图做为主画布
+      - 正面图缩放后裁剪成圆形，贴在右下角，带阴影
+    参数为相对比例，自适应不同尺寸图片。
+    """
+    back = Image.open(back_path).convert("RGB")
+    front = Image.open(front_path).convert("RGB")
+    w, h = back.size
+
+    diameter = int(w * inset_ratio)
+    if diameter <= 2:
+        raise ValueError("图片宽度太小，无法生成圆形插图")
+    radius = diameter // 2
+    cx = int(w * center_x_ratio)
+    cy = int(h * center_y_ratio)
+
+    # 正面图缩放到正方形
+    front_sq = front.resize((diameter, diameter), Image.LANCZOS)
+
+    # 圆形 mask（抗锯齿羽化 1px）
+    mask = Image.new("L", (diameter, diameter), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, diameter - 1, diameter - 1), fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=1))
+
+    # 阴影层：圆形高斯模糊 + 半透明黑色
+    base = back.convert("RGBA")
+    sd = Image.new("L", (diameter, diameter), 0)
+    sdraw = ImageDraw.Draw(sd)
+    sdraw.ellipse((0, 0, diameter - 1, diameter - 1), fill=255)
+    sd = sd.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
+    shadow = Image.new("RGBA", (diameter, diameter), (0, 0, 0, int(255 * shadow_opacity)))
+    shadow.putalpha(sd)
+    sx = cx - radius + shadow_offset[0]
+    sy = cy - radius + shadow_offset[1]
+    base.paste(shadow, (sx, sy), shadow)
+
+    # 圆形正面图贴到主画布
+    circle = front_sq.convert("RGBA")
+    circle.putalpha(mask)
+    base.paste(circle, (cx - radius, cy - radius), mask)
+
+    base.convert("RGB").save(out_path, quality=100, optimize=True)
+    return out_path
+
+
 def process_dx(ps, dx_folder):
     """处理单个 DX 的 BW 合成（白T + 黑T）。"""
     upload = os.path.join(BASE, dx_folder, "03_UPLOAD")
@@ -205,26 +264,15 @@ def process_dx(ps, dx_folder):
         if os.path.exists(out_path):
             log(f"  覆盖{color}：{output_name}已存在，将重新生成")
 
-        log(f"  打开{color}正背两张...")
-        back_doc = open_doc(ps, back_img)
-        front_doc = open_doc(ps, front_img)
-        wait_docs(ps, 2)
-        ps.DisplayDialogs = 3  # DialogModes.NO
-        config.hide_ps_window(ps)
-        log(f"  已打开 {ps.Documents.Count} 个文档")
-
-        # 激活背面文档并执行动作
-        ps.ActiveDocument = back_doc
-        log(f"  激活: {back_doc.Name}")
-        ps.DoAction(action_name, '正反图')
-        log(f"  动作: 正反图 > {action_name}")
-        config.hide_ps_window(ps)
-
-        export_bw(ps, out_path)
-        register_bw_meta(back_img, front_img, out_path)
-
-        close_docs([back_doc, front_doc])
-        results.append((color, True))
+        try:
+            compose_bw_pil(front_img, back_img, out_path)
+            size = os.path.getsize(out_path)
+            log(f"  OK: {output_name} ({size/1024:.0f}KB)")
+            register_bw_meta(back_img, front_img, out_path)
+            results.append((color, True))
+        except Exception as e:
+            log(f"  BW合成失败: {e}")
+            results.append((color, False))
 
     return results
 

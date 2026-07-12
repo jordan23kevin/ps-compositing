@@ -1,8 +1,10 @@
-# ===== PS 正反图批处理 v1.6 =====
+# ===== PS 正反图批处理 v1.7 =====
+# 变更 v1.7：
+#   - 圆形插图保留正面图完整背景（木地板、报纸、鞋子、衣架），不再把背景填成衣服色。
+#   - 白边 2px + 阴影：让圆形插图边缘与底图有自然分隔。
 # 变更 v1.6：
 #   - 用 DX0481 样张校准 PIL 版式：背面图做底 + 去背景后的正面图圆形插图 + 阴影。
 #   - 参考样张测得参数：插图直径≈44.5%宽度，中心(75.8%, 81.2%)。
-#   - 新增 _remove_shirt_background：Otsu + 最大连通域分离 T 恤与背景，复刻 PS 动作效果。
 # 变更 v1.5：
 #   - 将 BW 合成从 Photoshop 动作集「正反图」改为 PIL 直拼，
 #     消除对私有 PS 动作集（白T/黑T）的依赖。新 PS 安装/迁移后动作集
@@ -13,8 +15,6 @@
 #   - 用主动轮询替代硬编码 sleep，减少等待
 # 直读03_UPLOAD贴图结果，直写03_UPLOAD BW合成图
 import io, win32com.client, pythoncom, os, time, sys, tempfile
-import numpy as np
-import cv2
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 try:
@@ -173,44 +173,11 @@ def register_bw_meta(back_img, front_img, out_path):
         log(f"  BW元数据注册失败: {e}")
 
 
-def _remove_shirt_background(img, shirt_color):
-    """用 Otsu + 连通域分离 T 恤与背景，把背景填成 T 恤色，保留印花。"""
-    arr = np.array(img)
-    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
-
-    if shirt_color == "white":
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        fill = (255, 255, 255)
-    else:
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        fill = (0, 0, 0)
-
-    # 反转后标记外层背景（碰边界的标签）
-    inv = cv2.bitwise_not(binary)
-    num_labels, labels = cv2.connectedComponents(inv, connectivity=8)
-
-    border_labels = set()
-    for i in range(labels.shape[0]):
-        border_labels.add(labels[i, 0])
-        border_labels.add(labels[i, -1])
-    for j in range(labels.shape[1]):
-        border_labels.add(labels[0, j])
-        border_labels.add(labels[-1, j])
-
-    outer_bg = np.zeros(labels.shape, dtype=bool)
-    for label in border_labels:
-        if label != 0:
-            outer_bg |= (labels == label)
-
-    result = arr.copy()
-    result[outer_bg] = fill
-    return Image.fromarray(result)
-
-
 def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
                    diameter_ratio=0.445, center_x_ratio=0.758, center_y_ratio=0.812,
-                   shadow_offset=(8, 8), shadow_blur=12, shadow_opacity=0.25):
-    """用 PIL 复刻「正反图」BW 合成：背面图做底，正面图去背景后裁成圆形插图，贴到右下角。
+                   shadow_offset=(8, 8), shadow_blur=12, shadow_opacity=0.25,
+                   border_width=2):
+    """用 PIL 复刻「正反图」BW 合成：背面图做底，正面图保留原背景并裁成圆形插图，贴到右下角。
 
     参数依据 DX0481 样张测量：
       - 插图直径 ≈ 44.5% 底图宽度
@@ -222,7 +189,7 @@ def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
         shirt_color = "black"
 
     back = Image.open(back_path).convert("RGB")
-    front = _remove_shirt_background(Image.open(front_path).convert("RGB"), shirt_color)
+    front = Image.open(front_path).convert("RGB")
 
     w, h = back.size
     diameter = int(w * diameter_ratio)
@@ -232,16 +199,15 @@ def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
     cx = int(w * center_x_ratio)
     cy = int(h * center_y_ratio)
 
-    # 正面图按比例缩放，长边刚好等于直径，保持完整 T 恤可见
+    # 正面图按比例缩放，长边刚好等于直径
     fw, fh = front.size
     scale = diameter / max(fw, fh)
     new_w = int(fw * scale)
     new_h = int(fh * scale)
     front_scaled = front.resize((new_w, new_h), Image.LANCZOS)
 
-    # D×D 画布，背景用 T 恤色，正面图居中
-    fill = (255, 255, 255, 255) if shirt_color == "white" else (0, 0, 0, 255)
-    canvas = Image.new("RGBA", (diameter, diameter), fill)
+    # D×D 画布，透明背景，正面图居中
+    canvas = Image.new("RGBA", (diameter, diameter), (0, 0, 0, 0))
     ox = (diameter - new_w) // 2
     oy = (diameter - new_h) // 2
     canvas.paste(front_scaled, (ox, oy))
@@ -253,21 +219,38 @@ def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
     mask = mask.filter(ImageFilter.GaussianBlur(radius=0.5))
     canvas.putalpha(mask)
 
+    # 完整圆形对象：白边 + 图像
+    full_size = diameter + 2 * border_width
+    full_obj = Image.new("RGBA", (full_size, full_size), (0, 0, 0, 0))
+
+    # 白边
+    white_bg = Image.new("RGBA", (full_size, full_size), (255, 255, 255, 255))
+    border_mask = Image.new("L", (full_size, full_size), 0)
+    draw = ImageDraw.Draw(border_mask)
+    draw.ellipse((0, 0, full_size - 1, full_size - 1), fill=255)
+    border_mask = border_mask.filter(ImageFilter.GaussianBlur(radius=0.5))
+    white_bg.putalpha(border_mask)
+    full_obj.paste(white_bg, (0, 0), white_bg)
+
+    # 图像居中贴在白边上
+    full_obj.paste(canvas, (border_width, border_width), mask)
+
     base = back.convert("RGBA")
 
-    # 阴影层
+    # 阴影层（基于完整圆形对象，包含白边）
     if shadow_opacity > 0 and shadow_blur > 0:
-        sd = Image.new("L", (diameter, diameter), 0)
+        shadow_size = full_size + 2 * shadow_blur
+        sd = Image.new("L", (shadow_size, shadow_size), 0)
         sdraw = ImageDraw.Draw(sd)
-        sdraw.ellipse((0, 0, diameter - 1, diameter - 1), fill=255)
+        sdraw.ellipse((shadow_blur, shadow_blur, shadow_blur + full_size - 1, shadow_blur + full_size - 1), fill=255)
         sd = sd.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
-        shadow = Image.new("RGBA", (diameter, diameter), (0, 0, 0, int(255 * shadow_opacity)))
+        shadow = Image.new("RGBA", (shadow_size, shadow_size), (0, 0, 0, int(255 * shadow_opacity)))
         shadow.putalpha(sd)
-        sx = cx - radius + shadow_offset[0]
-        sy = cy - radius + shadow_offset[1]
+        sx = cx - radius - border_width + shadow_offset[0] - shadow_blur
+        sy = cy - radius - border_width + shadow_offset[1] - shadow_blur
         base.paste(shadow, (sx, sy), shadow)
 
-    base.paste(canvas, (cx - radius, cy - radius), mask)
+    base.paste(full_obj, (cx - radius - border_width, cy - radius - border_width), full_obj)
     base.convert("RGB").save(out_path, quality=100, optimize=True, subsampling=0)
     return out_path
 

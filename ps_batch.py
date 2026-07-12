@@ -1,10 +1,14 @@
-# ===== PS 正反图批处理 v1.7 =====
+# ===== PS 正反图批处理 v1.8 =====
+# 变更 v1.8：
+#   - 按 DX0481 参考图 + 用户规格精确调整 BW 合成：
+#       * 画布 1340×1785，圆圈直径 595
+#       * 正面图缩放为「宽度贴合圆圈」（≈44.4% 原图），高度自然溢出后垂直居中裁切
+#       * 圆心位于参考图实测位置 (1014, 1449)，即 75.67% 宽 / 81.18% 高
+#       * 白边 5px，无阴影
 # 变更 v1.7：
 #   - 圆形插图保留正面图完整背景（木地板、报纸、鞋子、衣架），不再把背景填成衣服色。
-#   - 白边 2px + 阴影：让圆形插图边缘与底图有自然分隔。
 # 变更 v1.6：
 #   - 用 DX0481 样张校准 PIL 版式：背面图做底 + 去背景后的正面图圆形插图 + 阴影。
-#   - 参考样张测得参数：插图直径≈44.5%宽度，中心(75.8%, 81.2%)。
 # 变更 v1.5：
 #   - 将 BW 合成从 Photoshop 动作集「正反图」改为 PIL 直拼，
 #     消除对私有 PS 动作集（白T/黑T）的依赖。新 PS 安装/迁移后动作集
@@ -174,14 +178,22 @@ def register_bw_meta(back_img, front_img, out_path):
 
 
 def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
-                   diameter_ratio=0.445, center_x_ratio=0.758, center_y_ratio=0.812,
-                   shadow_offset=(8, 8), shadow_blur=12, shadow_opacity=0.25,
-                   border_width=2):
-    """用 PIL 复刻「正反图」BW 合成：背面图做底，正面图保留原背景并裁成圆形插图，贴到右下角。
+                   diameter=595, center_x_ratio=0.7567, center_y_ratio=0.8118,
+                   front_scale=None, border_width=5,
+                   shadow_offset=(0, 0), shadow_blur=0, shadow_opacity=0.0):
+    """用 PIL 像素级复刻「正反图」BW 合成（依据 DX0481 参考图实测参数）。
 
-    参数依据 DX0481 样张测量：
-      - 插图直径 ≈ 44.5% 底图宽度
-      - 插图中心 ≈ (75.8% 宽, 81.2% 高)
+    规格（用户给定 + 参考图实测）：
+      - 底图 1340×1785，圆形插图直径 595（半径 297）。
+      - 正面图缩放到「宽度 = 圆圈直径」（实测比例≈0.444，即 595/1340）。
+        此时高度（≈793）大于圆圈，垂直居中后上下各裁掉约 99px，
+        只保留圆圈内的部分 —— 与参考图一致。
+      - 圆心位于 (1014, 1449)，即宽 75.67% / 高 81.18%（参考图实测）。
+      - 白边宽度 5px（在圆圈外侧加一圈白）。
+      - 不要阴影。
+
+    front_scale：正面图缩放系数（相对原图像素）。默认 None = 宽度贴合圆圈。
+      若用户要求「缩放到 50%」，传 front_scale=0.5 即可。
     """
     if shirt_color in ("白", "white"):
         shirt_color = "white"
@@ -192,57 +204,47 @@ def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
     front = Image.open(front_path).convert("RGB")
 
     w, h = back.size
-    diameter = int(w * diameter_ratio)
-    if diameter <= 2:
-        raise ValueError("图片宽度太小，无法生成圆形插图")
+    cx = int(round(w * center_x_ratio))
+    cy = int(round(h * center_y_ratio))
     radius = diameter // 2
-    cx = int(w * center_x_ratio)
-    cy = int(h * center_y_ratio)
 
-    # 正面图按比例缩放，长边刚好等于直径
+    # 正面图缩放
     fw, fh = front.size
-    scale = diameter / max(fw, fh)
-    new_w = int(fw * scale)
-    new_h = int(fh * scale)
-    front_scaled = front.resize((new_w, new_h), Image.LANCZOS)
+    if front_scale is None:
+        front_scale = diameter / fw          # 宽度贴合圆圈
+    scaled = front.resize((int(fw * front_scale), int(fh * front_scale)), Image.LANCZOS)
+    sw, sh = scaled.size
 
-    # D×D 画布，透明背景，正面图居中
+    # 直径×直径透明画布，正面图居中（宽/高超出则自然裁切）
     canvas = Image.new("RGBA", (diameter, diameter), (0, 0, 0, 0))
-    ox = (diameter - new_w) // 2
-    oy = (diameter - new_h) // 2
-    canvas.paste(front_scaled, (ox, oy))
+    ox = (diameter - sw) // 2
+    oy = (diameter - sh) // 2
+    canvas.paste(scaled, (ox, oy))
 
     # 圆形 mask（0.5px 羽化去锯齿）
     mask = Image.new("L", (diameter, diameter), 0)
-    draw = ImageDraw.Draw(mask)
-    draw.ellipse((0, 0, diameter - 1, diameter - 1), fill=255)
+    ImageDraw.Draw(mask).ellipse((0, 0, diameter - 1, diameter - 1), fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(radius=0.5))
     canvas.putalpha(mask)
 
-    # 完整圆形对象：白边 + 图像
+    # 完整对象：白边(外圈5px) + 圆形正面图
     full_size = diameter + 2 * border_width
-    full_obj = Image.new("RGBA", (full_size, full_size), (0, 0, 0, 0))
-
-    # 白边
+    full = Image.new("RGBA", (full_size, full_size), (0, 0, 0, 0))
     white_bg = Image.new("RGBA", (full_size, full_size), (255, 255, 255, 255))
     border_mask = Image.new("L", (full_size, full_size), 0)
-    draw = ImageDraw.Draw(border_mask)
-    draw.ellipse((0, 0, full_size - 1, full_size - 1), fill=255)
+    ImageDraw.Draw(border_mask).ellipse((0, 0, full_size - 1, full_size - 1), fill=255)
     border_mask = border_mask.filter(ImageFilter.GaussianBlur(radius=0.5))
     white_bg.putalpha(border_mask)
-    full_obj.paste(white_bg, (0, 0), white_bg)
-
-    # 图像居中贴在白边上
-    full_obj.paste(canvas, (border_width, border_width), mask)
+    full.paste(white_bg, (0, 0), white_bg)
+    full.paste(canvas, (border_width, border_width), mask)
 
     base = back.convert("RGBA")
-
-    # 阴影层（基于完整圆形对象，包含白边）
+    # 阴影：默认关闭（shadow_opacity=0）
     if shadow_opacity > 0 and shadow_blur > 0:
         shadow_size = full_size + 2 * shadow_blur
         sd = Image.new("L", (shadow_size, shadow_size), 0)
-        sdraw = ImageDraw.Draw(sd)
-        sdraw.ellipse((shadow_blur, shadow_blur, shadow_blur + full_size - 1, shadow_blur + full_size - 1), fill=255)
+        ImageDraw.Draw(sd).ellipse(
+            (shadow_blur, shadow_blur, shadow_blur + full_size - 1, shadow_blur + full_size - 1), fill=255)
         sd = sd.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
         shadow = Image.new("RGBA", (shadow_size, shadow_size), (0, 0, 0, int(255 * shadow_opacity)))
         shadow.putalpha(sd)
@@ -250,7 +252,7 @@ def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
         sy = cy - radius - border_width + shadow_offset[1] - shadow_blur
         base.paste(shadow, (sx, sy), shadow)
 
-    base.paste(full_obj, (cx - radius - border_width, cy - radius - border_width), full_obj)
+    base.paste(full, (cx - radius - border_width, cy - radius - border_width), full)
     base.convert("RGB").save(out_path, quality=100, optimize=True, subsampling=0)
     return out_path
 

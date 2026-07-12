@@ -61,7 +61,7 @@
 |---|---|---|---|---|---|
 | ZCodeProject | `C:\Users\Administrator\ZCodeProject` | `github.com/jordan23kevin/ZCodeProject.git` | master | bridge v2.3.23 | 大脑/编排（lovart_bridge + check_rem） |
 | ps-compositing | `E:\Claude code\ps` | `github.com/jordan23kevin/ps-compositing.git` | master | **v2.5.1** | 平铺图贴花 + BW 合成（纯 PIL） |
-| white_t_mockup | `E:\Kimi Code\white_t_mockup` | （本地） | white-t-mockup | **v1.8.0** | 模特图贴图引擎（gradient + 布料同步明度） |
+| white_t_mockup | `E:\Kimi Code\white_t_mockup` | （本地） | white-t-mockup | **v1.8.1** | 模特图贴图引擎（gradient + 布料同步明度 + 手部硬遮挡） |
 | 04_OS | `D:\Semems WB\04_OS` | `github.com/.../semems-wb-04os.git` | master | w_mockup_extra v2.4 | 命名规则 + 生产参数 |
 
 > 同步点 tag：四个仓库均打 `pipeline-2026-07-12`。
@@ -174,6 +174,7 @@
 | 9 | `strengthen_occlusion` 在模特图大块消失 | 把位移场偏离当深褶，误判背景/身体边缘为深褶 | 还原保守 occlusion，新款不再自动加强 | 04_OS tpl_generator |
 | 10 | 平铺图定位参数写死导致图案过小/偏位 | 旧 `FRONT_NEW/BACK_NEW` 的 `scale_percent=13.33%` 把图缩成胸口小标 | 改用素材库 `.meta.json` 五参（width/height/rotation/highest_y/center_x），按胚衣真实尺寸定位 | wb_sticker_ps v2.5.0 |
 | 11 | 黑色平铺图贴花部分发暗/发脏 | 通用/白版 `_W_cut.png` 直接贴黑胚衣，设计图含大量半透明边缘/纹理，与黑色混合后变暗 | `wb_sticker_ps.place_design(black_optimize=True)` 自动做白墨打底+暗部提亮；无 `_黑*_cut.png` 时生效 | wb_sticker_ps v2.4.1 |
+| 12 | 模特图贴图「贴在手上」 | peiyi_mask 生成的 `*_occluder.png` alpha 最大仅 254 且边缘偏灰，paste 后手像半透玻璃，印花从心形/文字边缘微透出来 | `white_t_mockup` 新增 `_harden_occluder_alpha`：把非透明遮挡区 alpha 拉满到 255，手/配饰完全盖住印花 | white_t_mockup v1.8.1 |
 
 ---
 
@@ -251,7 +252,7 @@ done
 ```
 
 如需任意更早版本：`git -C <repo> log --oneline` 找 SHA，`git -C <repo> checkout <SHA>`。
-改 `ps_batch.py` / `wb_sticker_ps.py` 等纯软件脚本**存盘即生效**，无需重启 bridge；改 `white_t_mockup` / `w_mockup_extra.py` 需 kill 8766 进程后重启 `lovart_bridge.bat`。
+改 `ps_batch.py` / `wb_sticker_ps.py` 等纯软件脚本**存盘即生效**，无需重启 bridge；改 `w_mockup_extra.py` 需 kill 8766 进程后重启 `lovart_bridge.bat`；`white_t_mockup` 由每次子进程重新导入，**存盘即生效，无需重启**。
 
 ### 已知良好基线（本次同步点）
 | 仓库 | tag | SHA |

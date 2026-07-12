@@ -1,5 +1,13 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.4.1 — 2026-07-12（黑T 平铺图自动优化）
+
+- **wb_sticker_ps.py v2.4.1**
+  - 新增 `black_optimize` 开关：当通用/白版设计图贴在黑胚衣上时，自动调用 `black_opt.black_shirt_print_optimize`（白墨打底 + 暗部提亮 + 饱和补偿），解决黑T平铺图「边缘/文字发暗、发脏」问题。
+  - `process_dx_folder` 中 4 个黑胚衣落点（W黑T×2、B黑T×2）均启用该优化；白胚衣落点与已有 `_黑*_cut.png` 专用款不受影响。
+  - 新增 `black_opt.py`：自 `check_rem.py` 抽取黑衫优化函数，带 `cv2` 兜底，缺 `cv2` 时自动跳过、不中断贴图。
+  - 已验证：DX0648 重新生成后黑T不发暗，与白T几何完全一致。
+
 ## v2.0.0 — 2026-07-12（重大：去除 Photoshop 依赖）
 
 - **ps_batch.py v2.0.0**

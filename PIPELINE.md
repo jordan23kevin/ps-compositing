@@ -151,6 +151,11 @@
 ### 4.8 单面款清理与元数据注册
 `wb_sticker_ps.cleanup_stale_uploads`：单面款贴图前清理 03_UPLOAD 中已不存在的互补面/旧 BW 残留。`wb_meta.register_sticker` / `register_bw` 为每张产物写 sidecar（UID/group_id），溯源不依赖文件名。
 
+### 4.9 平铺图通用黑衫自动优化（v2.4.1）
+`wb_sticker_ps.place_design` 新增 `black_optimize` 开关：当通用/白版设计图没有对应 `_黑*_cut.png` 专用文件、必须直接贴在黑胚衣上时，自动调用 `black_opt.black_shirt_print_optimize`（自适应白墨打底 + 暗部提亮 + 饱和补偿）。这能避免通用图的半透明边缘/纹理与黑色胚衣混合导致的「边缘发暗、文字发脏」。
+- 仅对 `process_dx_folder` 的 4 个黑胚衣落点（W黑T×2、B黑T×2）开启；
+- 白胚衣落点、已有 `_黑B/_黑W/_黑BW_cut.png` 专用款均不受影响（专用款由 `process_black.py` 处理，已优化）。
+
 ---
 
 ## 五、遇到的问题与解决方案
@@ -167,6 +172,7 @@
 | 8 | 平铺图贴花去 PS | PS 启动慢、动作集缺失会崩、批量累加速度慢 | 纯 PIL affine 复刻（diff 0.3–0.9），彻底移除 win32com | ps-compositing v2.0/2.4/2.5 |
 | 9 | `strengthen_occlusion` 在模特图大块消失 | 把位移场偏离当深褶，误判背景/身体边缘为深褶 | 还原保守 occlusion，新款不再自动加强 | 04_OS tpl_generator |
 | 10 | 平铺图定位参数来源混淆 | 误以为用 `meta.json` 五参 | 实际用 `config.py` 的 `FRONT_NEW/BACK_NEW`（scale/rotation/center） | 文档澄清 |
+| 11 | 黑色平铺图贴花部分发暗/发脏 | 通用/白版 `_W_cut.png` 直接贴黑胚衣，设计图含大量半透明边缘/纹理，与黑色混合后变暗 | `wb_sticker_ps.place_design(black_optimize=True)` 自动做白墨打底+暗部提亮；无 `_黑*_cut.png` 时生效 | wb_sticker_ps v2.4.1 |
 
 ---
 

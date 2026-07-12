@@ -1,4 +1,11 @@
-# ===== WB 贴图主控 v2.4.0（纯软件，不再依赖 Photoshop） =====
+# ===== WB 贴图主控 v2.4.1（纯软件，不再依赖 Photoshop） =====
+# 变更 v2.4.1（2026-07-12）：
+#   - StickerSession.place_design 新增 black_optimize 开关：贴在黑胚衣时自动调用
+#     black_opt.black_shirt_print_optimize（白墨打底 + 暗部提亮），解决通用/白版
+#     设计图直接贴黑衫时半透明边缘/纹理与黑色混合导致的「变暗 / 发脏」问题。
+#   - process_dx_folder 中 4 个黑胚衣落点（W黑T×2、B黑T×2）均传入 black_optimize=True；
+#     白胚衣落点不受影响。已有 _黑*_cut.png 专用图的款仍走 process_black.py（已优化）。
+#   - 新增 black_opt.py（自 check_rem.py 抽取黑衫优化，带 cv2 兜底，缺 cv2 时自动跳过）。
 # 变更 v2.4.0（2026-07-12）：
 #   - StickerSession.place_design 改为纯 PIL 实现（trim→缩放→平移→绕中心旋转→normal 合成），
 #     复刻原 place_design.jsx 定位；移除 win32com/pythoncom，不再连接 Photoshop。
@@ -29,7 +36,7 @@ except Exception:
 
 ALPHA_THRESHOLD = 20
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）
@@ -120,7 +127,7 @@ class StickerSession:
         # 纯软件实现，无需连接 Photoshop
         self.temp_dir = tempfile.gettempdir()
 
-    def place_design(self, design_path, torso_path, output_path, placement_cfg, cut_meta=None):
+    def place_design(self, design_path, torso_path, output_path, placement_cfg, cut_meta=None, black_optimize=False):
         """纯软件贴花，接口与原 Photoshop 版完全一致。
 
         变换顺序与 JSX(place_design.jsx) 对齐：
@@ -139,6 +146,13 @@ class StickerSession:
 
         torso = Image.open(torso_path).convert("RGBA")
         design = Image.open(design_path).convert("RGBA")
+        if black_optimize:
+            try:
+                import black_opt
+                design = black_opt.black_shirt_print_optimize(design)
+                print("  🖤 已对黑衫应用白墨打底 + 暗部提亮优化")
+            except Exception as e:
+                print(f"  ⚠️ 黑衫优化跳过（不影响贴图）: {e}")
         a = np.array(design)
         alpha = a[:, :, 3]
         mask = alpha >= alpha_thr
@@ -376,7 +390,7 @@ def process_dx_folder(dx_folder, session=None):
                         design_path,
                         os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
                         os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "黑")),
-                        config.FRONT_NEW,
+                        config.FRONT_NEW, black_optimize=True,
                         cut_meta=cut_meta,
                     )
 
@@ -394,7 +408,7 @@ def process_dx_folder(dx_folder, session=None):
                         design_path,
                         os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
                         os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "黑")),
-                        config.BACK_NEW,
+                        config.BACK_NEW, black_optimize=True,
                         cut_meta=cut_meta,
                     )
                 print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
@@ -414,7 +428,7 @@ def process_dx_folder(dx_folder, session=None):
                         design_path,
                         os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
                         os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "黑")),
-                        config.FRONT_NEW,
+                        config.FRONT_NEW, black_optimize=True,
                         cut_meta=cut_meta,
                     )
 
@@ -433,7 +447,7 @@ def process_dx_folder(dx_folder, session=None):
                         design_path,
                         os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
                         os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "黑")),
-                        config.BACK_NEW,
+                        config.BACK_NEW, black_optimize=True,
                         cut_meta=cut_meta,
                     )
 

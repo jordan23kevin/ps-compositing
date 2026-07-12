@@ -90,7 +90,7 @@ class WhiteStickerSession:
 
     def place_one(self, side, cfg, inv_path, dx, upload, cut_meta=None):
         """贴一张白T：使用白色胚衣。"""
-        output_name = f"{dx}_{side}_白T.jpg"
+        output_name = f"{dx}_{side}白T.jpg"
         output_path = str(upload / output_name)
         torso_path = str(TORSO / cfg["torso_white"])
         self.sticker.place_design(inv_path, torso_path, output_path, cfg, cut_meta=cut_meta)
@@ -98,8 +98,8 @@ class WhiteStickerSession:
 
     def bw_synth(self, dx, upload):
         """BW合成：用PS动作合并B和W（白T版）。"""
-        b_img = str(upload / f"{dx}_B_白T.jpg")
-        w_img = str(upload / f"{dx}_W_白T.jpg")
+        b_img = str(upload / f"{dx}_B白T.jpg")
+        w_img = str(upload / f"{dx}_W白T.jpg")
         out_path = str(upload / f"{dx}_白BW.jpg")
 
         if not os.path.exists(b_img) or not os.path.exists(w_img):

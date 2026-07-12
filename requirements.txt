@@ -1,0 +1,9 @@
+# ps-compositing 运行依赖（纯软件，无需 Photoshop / pywin32）
+# 运行时：C:\Users\Administrator\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe (Python 3.11.15)
+Pillow>=10.0
+numpy>=1.24
+
+# 说明：
+# - 本仓库（平铺贴花 + BW 合成）仅需 Pillow + numpy。
+# - 模特图引擎 white_t_mockup（独立仓库）才需要 opencv-python / torch，
+#   其 cv2 实际来自 E:/python_packages，需 PYTHONPATH=E:/python_packages;E:/Kimi Code。

@@ -1,32 +1,20 @@
-# ===== PS 正反图批处理 v1.8 =====
-# 变更 v1.8：
-#   - 按 DX0481 参考图 + 用户规格精确调整 BW 合成：
-#       * 画布 1340×1785，圆圈直径 595
-#       * 正面图缩放为「宽度贴合圆圈」（≈44.4% 原图），高度自然溢出后垂直居中裁切
-#       * 圆心位于参考图实测位置 (1014, 1449)，即 75.67% 宽 / 81.18% 高
-#       * 白边 5px，无阴影
-# 变更 v1.7：
-#   - 圆形插图保留正面图完整背景（木地板、报纸、鞋子、衣架），不再把背景填成衣服色。
-# 变更 v1.6：
-#   - 用 DX0481 样张校准 PIL 版式：背面图做底 + 去背景后的正面图圆形插图 + 阴影。
-# 变更 v1.5：
-#   - 将 BW 合成从 Photoshop 动作集「正反图」改为 PIL 直拼，
-#     消除对私有 PS 动作集（白T/黑T）的依赖。新 PS 安装/迁移后动作集
-#     丢失也不会导致 BW 合成失败。
-# 变更 v1.4.0：
-#   - 整个批次复用同一个 Photoshop COM 会话
-#   - 每个 DX 一次打开 B/W 正背图，连续执行白/黑动作后统一关闭
-#   - 用主动轮询替代硬编码 sleep，减少等待
-# 直读03_UPLOAD贴图结果，直写03_UPLOAD BW合成图
-import io, win32com.client, pythoncom, os, time, sys, tempfile
+# ===== WB 正反图批处理 v2.0.0（纯软件，不再依赖 Photoshop） =====
+# 变更 v2.0.0（2026-07-12）：
+#   - 彻底移除 Photoshop 依赖：删除 get_ps/open_doc/wait_docs/close_docs/
+#     export_bw 等 COM 函数与 win32com/pythoncom 导入；main() 不再 CoInitialize。
+#   - BW 合成全程纯 PIL，整条「贴图 + BW」流水线从此零 PS 依赖、零 PS 动作集依赖。
+# 变更 v1.8：按 DX0481 参考图 + 用户规格精确调整 BW 合成（见 compose_bw_pil）。
+# 变更 v1.7：圆形插图保留正面图完整背景（木地板/报纸/鞋子/衣架），不再填衣服色。
+# 变更 v1.6：BW 合成由 PS 动作集「正反图」改为 PIL 直拼。
+# 变更 v1.4.0：单 DX 复用同一 PS COM 会话（v2.0.0 起已废弃）。
+# 直读 03_UPLOAD 贴图结果，直写 03_UPLOAD BW 合成图。
+import io, os, time, sys, tempfile
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 try:
     sys.stdout.reconfigure(encoding='utf-8')
 except Exception:
     pass
-
-import config
 
 BASE = r"D:\Semems WB\02_PROJECTS"
 
@@ -43,10 +31,13 @@ try:
 except Exception:
     real_sides = None
 
-# ---------------------------------------------------------------------------
-# 元数据辅助
-# ---------------------------------------------------------------------------
+VERSION = "2.0.0"
+
 _MIGRATED_DX = set()
+
+
+def log(msg):
+    print(f"[BW] {msg}", flush=True)
 
 
 def _role_from_name(name):
@@ -82,75 +73,6 @@ def _get_meta(path):
     if meta:
         return meta
     return _infer_meta(path)
-
-def log(msg):
-    print(f"[PS] {msg}", flush=True)
-
-
-def get_ps(timeout=10):
-    """获取 Photoshop COM 对象，带超时。"""
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        try:
-            return win32com.client.GetObject(Class='Photoshop.Application')
-        except:
-            time.sleep(0.1)
-    raise Exception("PS 连接超时")
-
-
-def open_doc(ps, img_path):
-    """通过 JSX app.open 打开一个图片文件，并返回当前活动文档。"""
-    doc_name = os.path.basename(img_path)
-    jsx = (
-        'var f = new File("' + img_path.replace("\\", "\\\\") + '");\n'
-        'app.open(f);\n'
-    )
-    temp_jsx = os.path.join(tempfile.gettempdir(), f"_open_{doc_name}.jsx")
-    with open(temp_jsx, "w", encoding="utf-8") as f:
-        f.write(jsx)
-    ps.DoJavaScriptFile(temp_jsx)
-    config.hide_ps_window(ps)
-    return ps.ActiveDocument
-
-
-def wait_docs(ps, target_count, timeout=10):
-    """主动轮询，等待文档数量达标。"""
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        try:
-            if ps.Documents.Count >= target_count:
-                return
-        except:
-            pass
-        time.sleep(0.05)
-
-
-def close_docs(docs):
-    """关闭指定文档列表。"""
-    for doc in docs:
-        try:
-            doc.Close(2)
-        except:
-            pass
-
-
-def export_bw(ps, out_path):
-    """用 ExportOptionsSaveForWeb 导出当前活动文档为 JPG。"""
-    if os.path.exists(out_path):
-        try:
-            os.remove(out_path)
-        except Exception as e:
-            log(f"  删除旧{os.path.basename(out_path)}失败: {e}")
-
-    export_opts = win32com.client.Dispatch('Photoshop.ExportOptionsSaveForWeb')
-    export_opts.Format = 6
-    export_opts.Quality = 100
-    export_opts.Optimized = True
-
-    ps.ActiveDocument.Export(ExportIn=out_path, ExportAs=2, Options=export_opts)
-    config.hide_ps_window(ps)
-    size = os.path.getsize(out_path)
-    log(f"  OK: {os.path.basename(out_path)} ({size/1024:.0f}KB)")
 
 
 def register_bw_meta(back_img, front_img, out_path):
@@ -258,7 +180,7 @@ def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
 
 
 def process_dx(ps, dx_folder):
-    """处理单个 DX 的 BW 合成（白T + 黑T）。"""
+    """处理单个 DX 的 BW 合成（白T + 黑T）。ps 参数为兼容旧调用保留，纯软件下未使用。"""
     upload = os.path.join(BASE, dx_folder, "03_UPLOAD")
 
     # 单面款（02_REM_BG 只有 B 或只有 W）不该合成 BW 平铺图：
@@ -317,6 +239,7 @@ def process_dx(ps, dx_folder):
 
 
 def main(start_dx=None):
+    """纯软件批量合成所有 DX 的 BW 图（不连接 Photoshop）。"""
     log(f"扫描: {BASE}")
     folders = sorted([d for d in os.listdir(BASE)
                       if os.path.isdir(os.path.join(BASE, d)) and d.startswith('DX')])
@@ -329,55 +252,28 @@ def main(start_dx=None):
     dx_times = []
     t_total = time.time()
 
-    pythoncom.CoInitialize()
-    ps = None
-    try:
-        ps = get_ps(timeout=15)
-        ps.DisplayDialogs = 3
-        config.hide_ps_window(ps)
+    for folder_name in folders:
+        log(f"\n{'='*50}")
+        log(">> " + folder_name)
+        log(f"{'='*50}")
+        t_dx = time.time()
 
-        for folder_name in folders:
-            log(f"\n{'='*50}")
-            log(">> " + folder_name)
-            log(f"{'='*50}")
-            t_dx = time.time()
+        try:
+            color_results = process_dx(None, folder_name)
+            for color, ok in color_results:
+                key = "白T" if color == "白T" else "黑T"
+                skip_key = "跳过白" if color == "白T" else "跳过黑"
+                if ok:
+                    results[key] += 1
+                else:
+                    results[skip_key] += 1
+        except Exception as e:
+            log(f"  异常: {e}")
+            results["失败"].append(folder_name)
 
-            try:
-                color_results = process_dx(ps, folder_name)
-                for color, ok in color_results:
-                    key = "白T" if color == "白T" else "黑T"
-                    skip_key = "跳过白" if color == "白T" else "跳过黑"
-                    if ok:
-                        results[key] += 1
-                    else:
-                        results[skip_key] += 1
-            except Exception as e:
-                log(f"  异常: {e}")
-                results["失败"].append(folder_name)
-                try:
-                    # 尽量清理残留文档
-                    for i in range(ps.Documents.Count, 0, -1):
-                        try:
-                            ps.Documents(i).Close(2)
-                        except:
-                            pass
-                except:
-                    pass
-
-            dt_dx = time.time() - t_dx
-            dx_times.append((folder_name, dt_dx))
-            log(f"⏱️  {folder_name} 完成，耗时 {dt_dx:.1f}秒")
-    finally:
-        if ps is not None:
-            try:
-                for i in range(ps.Documents.Count, 0, -1):
-                    try:
-                        ps.Documents(i).Close(2)
-                    except:
-                        pass
-            except:
-                pass
-        pythoncom.CoUninitialize()
+        dt_dx = time.time() - t_dx
+        dx_times.append((folder_name, dt_dx))
+        log(f"⏱️  {folder_name} 完成，耗时 {dt_dx:.1f}秒")
 
     dt_total = time.time() - t_total
     log(f"\n{'='*60}")
@@ -396,6 +292,7 @@ def main(start_dx=None):
     if dx_times:
         log(f"{'平均':<12} {dt_total/len(dx_times):>10.1f}")
     log(f"{'='*60}")
+
 
 if __name__ == "__main__":
     import sys

@@ -1,6 +1,18 @@
-# CHANGELOG — PS 贴图流水线
+# CHANGELOG — 贴图流水线（纯软件）
 
-## v2.4 — 2026-07-10
+## v2.0.0 — 2026-07-12（重大：去除 Photoshop 依赖）
+
+- **ps_batch.py v2.0.0**
+  - 彻底移除 `get_ps` / `open_doc` / `wait_docs` / `close_docs` / `export_bw` 等 COM 函数与 `win32com`/`pythoncom` 导入；`main()` 不再 `CoInitialize`。
+  - BW 合成全程纯 PIL；整条「贴图 + BW」流水线零 PS 依赖。
+- **wb_sticker_ps.py v2.4.0**：`StickerSession.place_design` 改为纯 PIL（trim→缩放→平移→绕中心旋转→normal 合成），复刻原 `place_design.jsx` 定位；移除 win32com。
+- **process_black.py / process_white.py v2.5.0**：
+  - 贴花复用纯软件 `StickerSession`（不再连 PS）。
+  - `bw_synth` 改用 `ps_batch.process_dx` 纯软件合成 BW，移除对缺失的 PS 动作集「正反图」的依赖（否则点贴图会崩溃）。
+- **BW 合成规格（v1.8→v2.0）**：依据 DX0481 参考图，圆直径 595、正面图宽度贴合圆圈（≈44.4%）、圆心 (1014,1449)、白边 5px、无阴影。
+- 验证：纯软件贴花与旧 PS 版像素差 0.3–0.9；单款 BW 合成 ≈0.3s；全流程无 Photoshop 进程。
+
+## v2.4 — 2026-07-10（历史，PS 版）
 
 ### 新增：单面款旧产物兜底清理（配合 04_OS check_rem v2.2.7 分流修复）
 

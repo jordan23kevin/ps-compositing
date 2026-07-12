@@ -1,9 +1,12 @@
-"""白T贴图处理 v1.1 — 反相/白版完成后调用，PS贴图+BW合成全覆盖
+"""白T贴图处理 v2.5.0（纯软件，不再依赖 Photoshop）
+
+反相/白版完成后调用：白T专用平铺图贴花 + 纯软件 BW 合成。
 
 逻辑与 process_black.py 对称：
   - 处理 02_REM_BG 中的 _白B/_白W/_白BW_cut.png
   - 全部使用白色胚衣生成 DX_*_白T.jpg
   - 合成 DX_白BW.jpg
+  - v2.5.0 起贴花与 BW 合成均为纯软件（PIL），不再连接 Photoshop。
 """
 import os, re, sys, tempfile, time
 from pathlib import Path
@@ -69,7 +72,7 @@ WHITE_FRONT = {
 
 
 # ---------------------------------------------------------------------------
-# Photoshop 会话：单 DX 内复用 StickerSession
+# 贴花会话：单 DX 内复用纯软件 StickerSession（不再连接 Photoshop）
 # ---------------------------------------------------------------------------
 class WhiteStickerSession:
     def __init__(self):

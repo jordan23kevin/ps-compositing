@@ -1,10 +1,12 @@
-"""黑T贴图处理 v2.4 — 反相完成后调用，PS贴图+BW合成全覆盖
+"""黑T贴图处理 v2.5.0（纯软件，不再依赖 Photoshop）
 
-变更 v2.3：
-  - 复用 wb_sticker_ps.StickerSession 进行黑T贴图，与通用贴图共享 JSX 路径模板，
-    修复因 {{TORSO_DOC_NAME}} / {{DESIGN_DOC_NAME}} 占位符与 JSX 不匹配导致的执行失败。
-  - BW 合成仍在本脚本内完成，直接操作 StickerSession 的 Photoshop COM 会话。
-  - 单 DX 内只开启一次 Photoshop，全部黑T贴图与 BW 合成完成后才关闭。
+反相完成后调用：黑T专用平铺图贴花 + 纯软件 BW 合成。
+
+变更 v2.5.0（2026-07-12）：
+  - 贴花复用 wb_sticker_ps.StickerSession（纯 PIL，不再连接 PS）。
+  - bw_synth 改为调用 ps_batch.process_dx 纯软件合成 BW，
+    移除对「正反图」PS 动作集的依赖（新电脑缺失该动作集会崩溃）。
+  - 单 DX 内只开一个纯软件 StickerSession，全部黑T贴图与 BW 合成完成后关闭。
 """
 import os, re, sys, tempfile, time
 from pathlib import Path
@@ -70,7 +72,7 @@ FRONT_NEW = {
 
 
 # ---------------------------------------------------------------------------
-# Photoshop 会话：单 DX 内复用 StickerSession
+# 贴花会话：单 DX 内复用纯软件 StickerSession（不再连接 Photoshop）
 # ---------------------------------------------------------------------------
 class BlackStickerSession:
     def __init__(self):

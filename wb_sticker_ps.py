@@ -1,8 +1,9 @@
-# ===== WB 贴图主控 v2.3 =====
-# 变更 v2.2：
-#   - 单 DX 内复用 Photoshop COM 会话，避免每贴一张图都重新连接 PS
-#   - 黑T优先使用 02_REM_BG 中的 _黑B/_黑W/_黑BW 专用文件
-#   - 检测到黑版专用文件时，通用图不再输出黑T成品，仅输出白T
+# ===== WB 贴图主控 v2.4.0（纯软件，不再依赖 Photoshop） =====
+# 变更 v2.4.0（2026-07-12）：
+#   - StickerSession.place_design 改为纯 PIL 实现（trim→缩放→平移→绕中心旋转→normal 合成），
+#     复刻原 place_design.jsx 定位；移除 win32com/pythoncom，不再连接 Photoshop。
+#   - 黑T优先使用 02_REM_BG 中的 _黑B/_黑W/_黑BW 专用文件（逻辑不变）。
+#   - 检测到黑版专用文件时，通用图不再输出黑T成品，仅输出白T（逻辑不变）。
 import os
 import re
 import sys
@@ -27,6 +28,8 @@ except Exception:
     wb_meta = None
 
 ALPHA_THRESHOLD = 20
+
+VERSION = "2.4.0"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）

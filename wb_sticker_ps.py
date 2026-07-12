@@ -8,8 +8,6 @@ import re
 import sys
 import io
 import time
-import win32com.client
-import pythoncom
 import tempfile
 from pathlib import Path
 from PIL import Image
@@ -111,77 +109,72 @@ def calculate_sticker_position(png_path):
 
 
 # ---------------------------------------------------------------------------
-# Photoshop 会话：单 DX 内复用 COM
+# 平铺图贴花会话：纯软件实现（不再依赖 Photoshop）
+# 复刻原 place_design.jsx 的 affine 变换：trim → 缩放 → 平移 → 绕中心旋转 → normal 合成
 # ---------------------------------------------------------------------------
 class StickerSession:
     def __init__(self):
-        pythoncom.CoInitialize()
-        self.ps_app = win32com.client.Dispatch("Photoshop.Application")
-        self.ps_app.DisplayDialogs = 3  # DialogModes.NO：不弹任何对话框
-        config.hide_ps_window(self.ps_app)
+        # 纯软件实现，无需连接 Photoshop
         self.temp_dir = tempfile.gettempdir()
 
-    def _prepare_scaled_design(self, design_path, placement_cfg):
-        """预先 trim + 缩放贴图，返回 (临时文件路径, move_x, move_y)。"""
-        pos = calculate_sticker_position(design_path)
-        scale = placement_cfg["scale_percent"] / 100
-
-        img = Image.open(design_path).convert("RGBA")
-        a = np.array(img)
-        alpha = a[:, :, 3]
-        mask = alpha >= ALPHA_THRESHOLD
-        ys, xs = np.where(mask)
-        if len(ys) == 0:
-            raise ValueError(f"无有效像素: {design_path}")
-
-        x0, x1 = xs.min(), xs.max() + 1
-        y0, y1 = ys.min(), ys.max() + 1
-        trimmed = img.crop((x0, y0, x1, y1))
-        new_w = int((x1 - x0) * scale)
-        new_h = int((y1 - y0) * scale)
-        scaled = trimmed.resize((new_w, new_h), Image.LANCZOS)
-
-        # 用 torso 文件名区分临时文件，避免同进程内冲突
-        torso_name = os.path.splitext(os.path.basename(placement_cfg["torso_white"]))[0]
-        temp_path = os.path.join(self.temp_dir, f"temp_design_{torso_name}_scaled.png")
-        scaled.save(temp_path, "PNG")
-
-        move_x = placement_cfg["target_center_x"] - new_w / 2
-        move_y = placement_cfg["target_top_y"]
-        return temp_path, move_x, move_y
-
     def place_design(self, design_path, torso_path, output_path, placement_cfg, cut_meta=None):
-        """通用贴图函数：JSX 内打开胚衣和设计图，贴图后关闭。"""
-        temp_design, move_x, move_y = self._prepare_scaled_design(design_path, placement_cfg)
+        """纯软件贴花，接口与原 Photoshop 版完全一致。
 
-        # 若旧文件存在则先删除，确保 saveAs 直接覆盖不弹窗
+        变换顺序与 JSX(place_design.jsx) 对齐：
+          1. 按 ALPHA_THRESHOLD 裁剪设计图透明边距
+          2. 按 scale_percent 缩放
+          3. 平移 move_x = target_center_x - new_w/2, move_y = target_top_y（图层左上角对齐）
+          4. 绕图层中心旋转 rotation 度（PS rotate 默认锚点=图层中心；
+             PS rotate(正)=顺时针，PIL rotate(正)=逆时针 → 取负匹配）
+          5. normal 混合（alpha 合成）到胚衣，与 JSX duplicate 图层默认一致
+        """
+        scale = placement_cfg["scale_percent"] / 100.0
+        rot = -placement_cfg["rotation"]
+        target_cx = placement_cfg["target_center_x"]
+        target_top_y = placement_cfg["target_top_y"]
+        alpha_thr = ALPHA_THRESHOLD
+
+        torso = Image.open(torso_path).convert("RGBA")
+        design = Image.open(design_path).convert("RGBA")
+        a = np.array(design)
+        alpha = a[:, :, 3]
+        mask = alpha >= alpha_thr
+        ys, xs = np.where(mask)
+        if len(xs) == 0:
+            raise ValueError(f"无有效像素: {design_path}")
+        x0, y0, x1, y1 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+
+        trimmed = design.crop((x0, y0, x1, y1))
+        tw, th = x1 - x0, y1 - y0
+        new_w = max(1, int(round(tw * scale)))
+        new_h = max(1, int(round(th * scale)))
+        scaled = trimmed.resize((new_w, new_h), Image.BICUBIC)
+
+        move_x = target_cx - new_w / 2
+        move_y = target_top_y
+
+        # 绕 scaled 中心旋转，旋转中心 = (move_x+new_w/2, move_y+new_h/2)
+        rotated = scaled.rotate(rot, expand=True, resample=Image.BICUBIC)
+        rw, rh = rotated.size
+        cx = move_x + new_w / 2
+        cy = move_y + new_h / 2
+        px = int(round(cx - rw / 2))
+        py = int(round(cy - rh / 2))
+
+        canvas = Image.new("RGBA", torso.size)
+        canvas.paste(rotated, (px, py), rotated)
+        out = Image.alpha_composite(torso, canvas)
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         if os.path.exists(output_path):
             try:
                 os.remove(output_path)
-            except Exception as e:
-                print(f"  ⚠️ 删除旧{os.path.basename(output_path)}失败: {e}")
+            except Exception:
+                pass
+        out.convert("RGB").save(output_path, "JPEG", quality=100, optimize=True, subsampling=0)
+        print(f"✅ 生成: {output_path}")
 
-        jsx_path = os.path.join(os.path.dirname(__file__), "jsx", "place_design.jsx")
-        with open(jsx_path, "r", encoding="utf-8") as f:
-            jsx_content = f.read()
-
-        jsx_content = jsx_content.replace("{{TORSO_PATH}}", torso_path.replace("\\", "\\\\"))
-        jsx_content = jsx_content.replace("{{DESIGN_PATH}}", temp_design.replace("\\", "\\\\"))
-        jsx_content = jsx_content.replace("{{OUTPUT_PATH}}", output_path.replace("\\", "\\\\"))
-        jsx_content = jsx_content.replace("{{ROTATION}}", str(placement_cfg["rotation"]))
-        jsx_content = jsx_content.replace("{{MOVE_X}}", str(move_x))
-        jsx_content = jsx_content.replace("{{MOVE_Y}}", str(move_y))
-
-        temp_jsx = os.path.join(self.temp_dir, "temp_place_design.jsx")
-        with open(temp_jsx, "w", encoding="utf-8") as f:
-            f.write(jsx_content)
-
-        t0 = time.time()
-        self.ps_app.DoJavaScriptFile(temp_jsx)
-        config.hide_ps_window(self.ps_app)
-        dt = time.time() - t0
-        print(f"✅ 生成: {output_path}  ({dt:.1f}秒)")
-
+        # 元数据注册（与原实现一致）
         if cut_meta is not None and wb_meta is not None:
             try:
                 out_name = os.path.basename(output_path)
@@ -198,7 +191,8 @@ class StickerSession:
                 print(f"  ⚠️ 元数据注册失败: {e}")
 
     def close(self):
-        pythoncom.CoUninitialize()
+        # 纯软件实现，无需关闭 Photoshop
+        pass
 
 
 def classify_design(filename):

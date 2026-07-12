@@ -6,7 +6,6 @@
   - 合成 DX_白BW.jpg
 """
 import os, re, sys, tempfile, time
-import win32com.client
 from pathlib import Path
 
 sys.path.insert(0, r"E:\Claude code\ps")
@@ -76,18 +75,7 @@ class WhiteStickerSession:
     def __init__(self):
         self.sticker = StickerSession()
 
-    def _open_file(self, file_path):
-        """通过 JSX app.open 打开文件，并返回当前活动文档对象。"""
-        doc_name = os.path.basename(file_path)
-        jsx = (
-            'var f = new File("' + file_path.replace("\\", "\\\\") + '");\n'
-            'app.open(f);\n'
-        )
-        temp_jsx = os.path.join(tempfile.gettempdir(), f"_open_{doc_name}.jsx")
-        with open(temp_jsx, "w", encoding="utf-8") as f:
-            f.write(jsx)
-        self.sticker.ps_app.DoJavaScriptFile(temp_jsx)
-        return self.sticker.ps_app.ActiveDocument
+    # _open_file 已移除：纯软件实现不再需要打开 Photoshop 文档
 
     def place_one(self, side, cfg, inv_path, dx, upload, cut_meta=None):
         """贴一张白T：使用白色胚衣。"""
@@ -98,61 +86,15 @@ class WhiteStickerSession:
         return output_name
 
     def bw_synth(self, dx, upload):
-        """BW合成：用PS动作合并B和W（白T版）。"""
-        b_img = str(upload / wb_naming.flat_name(dx, "B", "白"))
-        w_img = str(upload / wb_naming.flat_name(dx, "W", "白"))
-        out_path = str(upload / wb_naming.bw_name(dx, "白"))
-
-        if not os.path.exists(b_img) or not os.path.exists(w_img):
-            return "⏭️ 缺少 B/W 白T文件，跳过白BW合成"
-
-        b_doc = self._open_file(b_img)
-        w_doc = self._open_file(w_img)
-
-        t0 = time.time()
-        while self.sticker.ps_app.Documents.Count < 2 and time.time() - t0 < 10:
-            time.sleep(0.05)
-
-        self.sticker.ps_app.ActiveDocument = b_doc
-        self.sticker.ps_app.DoAction('白', '正反图')
-
-        if os.path.exists(out_path):
-            try:
-                os.remove(out_path)
-            except Exception as e:
-                print(f"  ⚠️ 删除旧白BW失败: {e}")
-
-        jpgOpt = win32com.client.Dispatch("Photoshop.JPEGSaveOptions")
-        jpgOpt.Quality = 12
-        self.sticker.ps_app.ActiveDocument.SaveAs(out_path, jpgOpt, True, 2)
-
-        for doc in (b_doc, w_doc):
-            try:
-                doc.Close(2)
-            except:
-                pass
-
-        if wb_meta is not None:
-            try:
-                meta_b = _get_meta(b_img)
-                meta_w = _get_meta(w_img)
-                uid = meta_b.get("uid") or meta_w.get("uid")
-                group_id = meta_b.get("group_id") or meta_w.get("group_id")
-                bw_role = "白BW"
-                bw_uid = f"{uid}_{bw_role}" if uid else None
-                wb_meta.register_bw(
-                    out_path,
-                    uid=bw_uid,
-                    group_id=group_id,
-                    role=bw_role,
-                    source_uids=[meta_b.get("uid"), meta_w.get("uid")],
-                    source_files=[os.path.basename(b_img), os.path.basename(w_img)],
-                )
-                print(f"  BW元数据已注册: {bw_role}")
-            except Exception as e:
-                print(f"  ⚠️ 白BW元数据注册失败: {e}")
-
-        return "✅ 白BW 合成完成"
+        """BW合成（纯软件）：复用 ps_batch.process_dx 合成该款全部 BW。"""
+        sys.path.insert(0, os.path.dirname(__file__))
+        try:
+            import ps_batch
+            results = ps_batch.process_dx(None, dx)
+            ok = any(ok_flag for _, ok_flag in results)
+            return "✅ 白BW 合成完成（纯软件）" if ok else "⏭️ 白BW 合成跳过（缺平铺图）"
+        except Exception as e:
+            return f"⚠️ 白BW 合成失败: {e}"
 
     def close(self):
         self.sticker.close()

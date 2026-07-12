@@ -1,9 +1,24 @@
 """WB贴图 PS 配置 — 路径、坐标、缩放、旋转"""
+import os
 import re
 
 # 胚衣路径
 BASE_TORSO = r"D:\Semems\1胚衣"
 SOURCE_BASE = r"D:\Semems WB\02_PROJECTS"
+
+# 平铺胚衣素材库（与 03_MATERIAL 一致；五参见各胚衣同名 .meta.json）
+# 经像素比对，以下胚衣与旧 1胚衣 的 白正2/黑正2/白背2/黑背2 为同一件衣服
+# （JPEG 重编码差 <1/255），切换底图不会改变成品外观，仅修正定位。
+MATERIAL_BASE = r"D:\Semems WB\03_MATERIAL"
+
+# 平铺胚衣标准款（工作记忆确认：白W11/黑W11 正、白B12/黑B7 背）
+# 每个胚衣后附同名 .meta.json 五参（width/height/rotation/highest_y/center_x）
+FLAT_TORSO = {
+    "W白": ("W白/白W11.jpg", "W白/白W11.meta.json"),
+    "W黑": ("W黑/黑W11.jpg", "W黑/黑W11.meta.json"),
+    "B白": ("B白/白B12.jpg", "B白/白B12.meta.json"),
+    "B黑": ("B黑/黑B7.jpg",  "B黑/黑B7.meta.json"),
+}
 
 # 图像参数
 ALPHA_THRESHOLD = 20
@@ -147,6 +162,21 @@ def parse_side_suffix(suffix):
 
 
 # 分类逻辑
+def flat_torso(side, color):
+    """返回 (torso_abs_path, meta_abs_path)。side∈{'W','B'}，color∈{'白','黑'}。"""
+    key = f"{side}{color}"
+    rel_t, rel_m = FLAT_TORSO[key]
+    return os.path.join(MATERIAL_BASE, rel_t), os.path.join(MATERIAL_BASE, rel_m)
+
+def load_meta(meta_path):
+    """读取胚衣 .meta.json 五参；缺失返回 None。"""
+    import json
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
 def get_type(filename):
     """从文件名获取类型（复刻自原 utils/sticker_typer.py）"""
     import os

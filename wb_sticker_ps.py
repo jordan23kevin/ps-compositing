@@ -1,4 +1,13 @@
-# ===== WB 贴图主控 v2.4.1（纯软件，不再依赖 Photoshop） =====
+# ===== WB 贴图主控 v2.5.0（纯软件，不再依赖 Photoshop） =====
+# 变更 v2.5.0（2026-07-12）：
+#   - 平铺图定位改为「素材库五参驱动」：place_design 优先读取胚衣同名
+#     .meta.json（width/height/rotation/highest_y/center_x），按素材库 黑W11/白W11/
+#     白B12/黑B7 的真实尺寸贴图，彻底替代 config.FRONT_NEW/BACK_NEW 写死的
+#     scale/center（旧 13.33% 把图缩成胸口小标、位置偏右）。
+#   - config 新增 MATERIAL_BASE / FLAT_TORSO / flat_torso() / load_meta()；
+#     process_dx_folder 经 flat_torso 取底图 + 五参，黑胚衣落点仍 black_optimize=True。
+#   - 经像素比对，素材库胚衣与旧 1胚衣 为同一件衣服（JPEG 重编码差 <1/255），
+#     切换底图不改变成品外观，仅修正定位。
 # 变更 v2.4.1（2026-07-12）：
 #   - StickerSession.place_design 新增 black_optimize 开关：贴在黑胚衣时自动调用
 #     black_opt.black_shirt_print_optimize（白墨打底 + 暗部提亮），解决通用/白版
@@ -36,7 +45,7 @@ except Exception:
 
 ALPHA_THRESHOLD = 20
 
-VERSION = "2.4.1"
+VERSION = "2.5.0"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）
@@ -127,21 +136,20 @@ class StickerSession:
         # 纯软件实现，无需连接 Photoshop
         self.temp_dir = tempfile.gettempdir()
 
-    def place_design(self, design_path, torso_path, output_path, placement_cfg, cut_meta=None, black_optimize=False):
+    def place_design(self, design_path, torso_path, output_path, placement_cfg=None, meta=None, cut_meta=None, black_optimize=False):
         """纯软件贴花，接口与原 Photoshop 版完全一致。
+
+        定位参数：优先用 meta（素材库五参 width/height/rotation/highest_y/center_x）；
+        未传 meta 时回退 placement_cfg（config.FRONT_NEW/BACK_NEW，供 process_black/white 旧线）。
 
         变换顺序与 JSX(place_design.jsx) 对齐：
           1. 按 ALPHA_THRESHOLD 裁剪设计图透明边距
-          2. 按 scale_percent 缩放
+          2. 按 scale 缩放（meta: width/设计宽；cfg: scale_percent）
           3. 平移 move_x = target_center_x - new_w/2, move_y = target_top_y（图层左上角对齐）
           4. 绕图层中心旋转 rotation 度（PS rotate 默认锚点=图层中心；
              PS rotate(正)=顺时针，PIL rotate(正)=逆时针 → 取负匹配）
           5. normal 混合（alpha 合成）到胚衣，与 JSX duplicate 图层默认一致
         """
-        scale = placement_cfg["scale_percent"] / 100.0
-        rot = -placement_cfg["rotation"]
-        target_cx = placement_cfg["target_center_x"]
-        target_top_y = placement_cfg["target_top_y"]
         alpha_thr = ALPHA_THRESHOLD
 
         torso = Image.open(torso_path).convert("RGBA")
@@ -163,20 +171,38 @@ class StickerSession:
 
         trimmed = design.crop((x0, y0, x1, y1))
         tw, th = x1 - x0, y1 - y0
+
+        # 定位参数：meta 优先（素材库五参），否则回退 config
+        if meta is not None:
+            scale = (meta["width"] / tw) if tw else 1.0
+            rot = -meta["rotation"]
+            target_cx = meta["center_x"]
+            target_top_y = meta["highest_y"]
+        else:
+            scale = placement_cfg["scale_percent"] / 100.0
+            rot = -placement_cfg["rotation"]
+            target_cx = placement_cfg["target_center_x"]
+            target_top_y = placement_cfg["target_top_y"]
+
         new_w = max(1, int(round(tw * scale)))
         new_h = max(1, int(round(th * scale)))
         scaled = trimmed.resize((new_w, new_h), Image.BICUBIC)
 
-        move_x = target_cx - new_w / 2
-        move_y = target_top_y
+        # 参考点 = 缩放后设计图「顶边中点」(new_w/2, 0)，应落在胚衣坐标
+        # (target_cx, target_top_y)。先求该点绕 scaled 中心旋转后在 R 中的位置，
+        # 再平移使参考点对齐目标。与生成批准图的 place_meta 逻辑一致。
+        import math
+        theta = math.radians(rot)  # rot 已取负（PIL 正角=逆时针），单位度
+        vx = (new_h / 2) * math.sin(theta)
+        vy = -(new_h / 2) * math.cos(theta)
 
-        # 绕 scaled 中心旋转，旋转中心 = (move_x+new_w/2, move_y+new_h/2)
+        # 绕 scaled 中心旋转，旋转中心 = scaled 中心
         rotated = scaled.rotate(rot, expand=True, resample=Image.BICUBIC)
         rw, rh = rotated.size
-        cx = move_x + new_w / 2
-        cy = move_y + new_h / 2
-        px = int(round(cx - rw / 2))
-        py = int(round(cy - rh / 2))
+        anchor_x = rw / 2 + vx
+        anchor_y = rh / 2 + vy
+        px = int(round(target_cx - anchor_x))
+        py = int(round(target_top_y - anchor_y))
 
         canvas = Image.new("RGBA", torso.size)
         canvas.paste(rotated, (px, py), rotated)
@@ -347,6 +373,17 @@ def process_dx_folder(dx_folder, session=None):
     if own_session:
         session = StickerSession()
 
+    # 五参定位：place_design 接收素材库 .meta.json，按胚衣真实尺寸贴图
+    # （不再用 config.FRONT_NEW/BACK_NEW 写死的 scale/center）
+    def _run(side, color, black_opt):
+        torso_p, meta_p = config.flat_torso(side, color)
+        session.place_design(
+            design_path, torso_p,
+            os.path.join(upload_folder, wb_naming.flat_name(dx_name, side, color)),
+            meta=config.load_meta(meta_p),
+            black_optimize=black_opt, cut_meta=cut_meta,
+        )
+
     t_dx = time.time()
     try:
         for file in os.listdir(rem_bg_folder):
@@ -377,79 +414,30 @@ def process_dx_folder(dx_folder, session=None):
             if design_type == "BW":
                 # ===== BW 类型：生成 W 和 B 两套文件，供 ps_batch.py 合成 =====
                 if not has_white:
-                    print("  → 生成 W 正面文件（新方案）...")
-                    session.place_design(
-                        design_path,
-                        os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
-                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "白")),
-                        config.FRONT_NEW,
-                        cut_meta=cut_meta,
-                    )
+                    print("  → 生成 W 正面文件（五参定位）...")
+                    _run("W", "白", False)
                 if not has_black:
-                    session.place_design(
-                        design_path,
-                        os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
-                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "黑")),
-                        config.FRONT_NEW, black_optimize=True,
-                        cut_meta=cut_meta,
-                    )
-
+                    _run("W", "黑", True)
                 if not has_white:
-                    print("  → 生成 B 背面文件（新方案）...")
-                    session.place_design(
-                        design_path,
-                        os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
-                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "白")),
-                        config.BACK_NEW,
-                        cut_meta=cut_meta,
-                    )
+                    print("  → 生成 B 背面文件（五参定位）...")
+                    _run("B", "白", False)
                 if not has_black:
-                    session.place_design(
-                        design_path,
-                        os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
-                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "黑")),
-                        config.BACK_NEW, black_optimize=True,
-                        cut_meta=cut_meta,
-                    )
+                    _run("B", "黑", True)
                 print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
 
             elif design_type == "W":
-                # ===== W 类型：正图新方案 =====
+                # ===== W 类型：正图五参定位 =====
                 if not has_white:
-                    session.place_design(
-                        design_path,
-                        os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
-                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "白")),
-                        config.FRONT_NEW,
-                        cut_meta=cut_meta,
-                    )
+                    _run("W", "白", False)
                 if not has_black:
-                    session.place_design(
-                        design_path,
-                        os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
-                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "黑")),
-                        config.FRONT_NEW, black_optimize=True,
-                        cut_meta=cut_meta,
-                    )
+                    _run("W", "黑", True)
 
             elif design_type == "B":
-                # ===== B 类型：背图新方案 =====
+                # ===== B 类型：背图五参定位 =====
                 if not has_white:
-                    session.place_design(
-                        design_path,
-                        os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
-                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "白")),
-                        config.BACK_NEW,
-                        cut_meta=cut_meta,
-                    )
+                    _run("B", "白", False)
                 if not has_black:
-                    session.place_design(
-                        design_path,
-                        os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
-                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "黑")),
-                        config.BACK_NEW, black_optimize=True,
-                        cut_meta=cut_meta,
-                    )
+                    _run("B", "黑", True)
 
         dt_dx = time.time() - t_dx
         print(f"⏱️  {dx_name} 完成，耗时 {dt_dx:.1f}秒")

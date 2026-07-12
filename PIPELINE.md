@@ -60,7 +60,7 @@
 | 仓库 | 本地路径 | 远程 | 分支 | 本次版本 | 角色 |
 |---|---|---|---|---|---|
 | ZCodeProject | `C:\Users\Administrator\ZCodeProject` | `github.com/jordan23kevin/ZCodeProject.git` | master | bridge v2.3.23 | 大脑/编排（lovart_bridge + check_rem） |
-| ps-compositing | `E:\Claude code\ps` | `github.com/jordan23kevin/ps-compositing.git` | master | **v2.0.0** | 平铺图贴花 + BW 合成（纯 PIL） |
+| ps-compositing | `E:\Claude code\ps` | `github.com/jordan23kevin/ps-compositing.git` | master | **v2.5.0** | 平铺图贴花 + BW 合成（纯 PIL） |
 | white_t_mockup | `E:\Kimi Code\white_t_mockup` | （本地） | white-t-mockup | **v1.8.0** | 模特图贴图引擎（gradient + 布料同步明度） |
 | 04_OS | `D:\Semems WB\04_OS` | `github.com/.../semems-wb-04os.git` | master | w_mockup_extra v2.4 | 命名规则 + 生产参数 |
 
@@ -109,14 +109,14 @@
 
 平铺图：`DX0650_W白T.jpg` / `DX0650_B黑T.jpg`；模特图：`DX0650_白W.jpg` / `DX0650_黑B.jpg`；BW：`DX0650_白BW.jpg` / `DX0650_黑BW.jpg`。
 
-### 4.2 平铺图纯软件贴花（v2.4.0）
+### 4.2 平铺图纯软件贴花（v2.5.0）
 `wb_sticker_ps.StickerSession.place_design`（纯 PIL）：
 1. 按 `ALPHA_THRESHOLD=20` 裁剪设计图透明边距；
-2. 按 `scale_percent` 缩放；
-3. 平移 `move_x = target_center_x - new_w/2`, `move_y = target_top_y`；
-4. 绕图层中心旋转 `rotation` 度（PS 顺时针为正 → PIL 取负匹配）；
+2. 读取胚衣同名 `.meta.json` 五参：`width/height/rotation/highest_y/center_x`；
+3. 按 `width/设计图宽度` 缩放，以「顶边中点」为参考点做平移与旋转；
+4. 绕图层中心旋转 `-rotation` 度（PS 顺时针为正 → PIL 取负匹配）；
 5. `alpha_composite` 正常混合到胚衣。
-定位参数全在 `ps-compositing/config.py` 的 `FRONT_NEW` / `BACK_NEW`（**不**依赖 `meta.json`）。与旧 PS 版（place_design.jsx）像素差 **0.3–0.9**（仅 JPEG 重编码差异，肉眼不可辨）。
+定位参数来自 `D:\Semems WB\03_MATERIAL\{W白,W黑,B白,B黑}\*.meta.json`（胚衣真实尺寸），`config.py` 中的 `FRONT_NEW/BACK_NEW` 仅保留为 `process_black.py/process_white.py` 旧线回退。与早期 place_meta 参考图平均像素差约 **5.5/255**（仅边缘抗锯齿/JPEG 差异，肉眼不可辨）。
 
 ### 4.3 BW 合成（v2.0.0，依据 DX0481 参考图）
 `ps_batch.compose_bw_pil`：
@@ -171,7 +171,7 @@
 | 7 | 黑衫贴图暗/近黑不可见 | 设计图近黑像素 + 默认混合 | `white_underbase` 白墨打底（v1.6 默认）+ `--preserve-color` | white_t_mockup v1.6 |
 | 8 | 平铺图贴花去 PS | PS 启动慢、动作集缺失会崩、批量累加速度慢 | 纯 PIL affine 复刻（diff 0.3–0.9），彻底移除 win32com | ps-compositing v2.0/2.4/2.5 |
 | 9 | `strengthen_occlusion` 在模特图大块消失 | 把位移场偏离当深褶，误判背景/身体边缘为深褶 | 还原保守 occlusion，新款不再自动加强 | 04_OS tpl_generator |
-| 10 | 平铺图定位参数来源混淆 | 误以为用 `meta.json` 五参 | 实际用 `config.py` 的 `FRONT_NEW/BACK_NEW`（scale/rotation/center） | 文档澄清 |
+| 10 | 平铺图定位参数写死导致图案过小/偏位 | 旧 `FRONT_NEW/BACK_NEW` 的 `scale_percent=13.33%` 把图缩成胸口小标 | 改用素材库 `.meta.json` 五参（width/height/rotation/highest_y/center_x），按胚衣真实尺寸定位 | wb_sticker_ps v2.5.0 |
 | 11 | 黑色平铺图贴花部分发暗/发脏 | 通用/白版 `_W_cut.png` 直接贴黑胚衣，设计图含大量半透明边缘/纹理，与黑色混合后变暗 | `wb_sticker_ps.place_design(black_optimize=True)` 自动做白墨打底+暗部提亮；无 `_黑*_cut.png` 时生效 | wb_sticker_ps v2.4.1 |
 
 ---

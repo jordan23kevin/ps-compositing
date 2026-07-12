@@ -20,6 +20,9 @@ import config
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 sys.path.insert(0, r"E:\Claude code\ps")
+sys.path.insert(0, r"D:\Semems WB\04_OS\engine")
+import wb_naming  # 命名规则唯一出处
+
 try:
     import wb_meta
 except Exception:
@@ -34,26 +37,8 @@ _MIGRATED_DX = set()
 
 
 def _role_from_name(name):
-    """从文件名推断 role（支持 _cut.png / 上传图 / BW 合成图 / 新平铺命名）"""
-    stem = os.path.splitext(name)[0]
-    if stem.endswith("_cut"):
-        stem = stem[:-4]
-    parts = stem.split("_")
-    last = parts[-1] if parts else ""
-    # 新平铺命名: {side}{color}T  例 W白T / B黑T（side=W/B, color=白/黑）
-    if len(last) == 3 and last[0] in "WB" and last[1] in "白黑" and last[2] == "T":
-        side, color = last[0], last[1]
-        return f"黑{side}" if color == "黑" else side
-    # 旧平铺命名(兼容): {side}_{color}T
-    if len(parts) >= 3 and parts[-1] in ("白T", "黑T"):
-        side = parts[-2]
-        torso = parts[-1]
-        if torso == "黑T":
-            return f"黑{side}"
-        return side
-    if len(parts) >= 2:
-        return parts[-1]
-    return "?"
+    """从文件名推断 role（规则见 wb_naming.role_from_name）"""
+    return wb_naming.role_from_name(name)
 
 
 def _infer_meta(path):
@@ -318,8 +303,8 @@ def cleanup_stale_uploads(dx_folder):
         return []
     missing_side = "W" if sides == {"B"} else "B"
     candidates = [
-        f"{dx}_白BW.jpg", f"{dx}_黑BW.jpg",
-        f"{dx}_{missing_side}白T.jpg", f"{dx}_{missing_side}黑T.jpg",
+        wb_naming.bw_name(dx, "白"), wb_naming.bw_name(dx, "黑"),
+        wb_naming.flat_name(dx, missing_side, "白"), wb_naming.flat_name(dx, missing_side, "黑"),
     ]
     removed = []
     for name in candidates:
@@ -385,7 +370,7 @@ def process_dx_folder(dx_folder, session=None):
                     session.place_design(
                         design_path,
                         os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
-                        os.path.join(upload_folder, f"{dx_name}_W白T.jpg"),
+                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "白")),
                         config.FRONT_NEW,
                         cut_meta=cut_meta,
                     )
@@ -393,7 +378,7 @@ def process_dx_folder(dx_folder, session=None):
                     session.place_design(
                         design_path,
                         os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
-                        os.path.join(upload_folder, f"{dx_name}_W黑T.jpg"),
+                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "黑")),
                         config.FRONT_NEW,
                         cut_meta=cut_meta,
                     )
@@ -403,7 +388,7 @@ def process_dx_folder(dx_folder, session=None):
                     session.place_design(
                         design_path,
                         os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
-                        os.path.join(upload_folder, f"{dx_name}_B白T.jpg"),
+                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "白")),
                         config.BACK_NEW,
                         cut_meta=cut_meta,
                     )
@@ -411,7 +396,7 @@ def process_dx_folder(dx_folder, session=None):
                     session.place_design(
                         design_path,
                         os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
-                        os.path.join(upload_folder, f"{dx_name}_B黑T.jpg"),
+                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "黑")),
                         config.BACK_NEW,
                         cut_meta=cut_meta,
                     )
@@ -423,7 +408,7 @@ def process_dx_folder(dx_folder, session=None):
                     session.place_design(
                         design_path,
                         os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_white"]),
-                        os.path.join(upload_folder, f"{dx_name}_W白T.jpg"),
+                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "白")),
                         config.FRONT_NEW,
                         cut_meta=cut_meta,
                     )
@@ -431,7 +416,7 @@ def process_dx_folder(dx_folder, session=None):
                     session.place_design(
                         design_path,
                         os.path.join(config.BASE_TORSO, config.FRONT_NEW["torso_black"]),
-                        os.path.join(upload_folder, f"{dx_name}_W黑T.jpg"),
+                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "W", "黑")),
                         config.FRONT_NEW,
                         cut_meta=cut_meta,
                     )
@@ -442,7 +427,7 @@ def process_dx_folder(dx_folder, session=None):
                     session.place_design(
                         design_path,
                         os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_white"]),
-                        os.path.join(upload_folder, f"{dx_name}_B白T.jpg"),
+                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "白")),
                         config.BACK_NEW,
                         cut_meta=cut_meta,
                     )
@@ -450,7 +435,7 @@ def process_dx_folder(dx_folder, session=None):
                     session.place_design(
                         design_path,
                         os.path.join(config.BASE_TORSO, config.BACK_NEW["torso_black"]),
-                        os.path.join(upload_folder, f"{dx_name}_B黑T.jpg"),
+                        os.path.join(upload_folder, wb_naming.flat_name(dx_name, "B", "黑")),
                         config.BACK_NEW,
                         cut_meta=cut_meta,
                     )

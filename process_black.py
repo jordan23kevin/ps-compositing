@@ -17,6 +17,7 @@ except Exception:
     wb_meta = None
 from config import SOURCE_BASE, parse_side_suffix
 from wb_sticker_ps import StickerSession, _role_from_name, cleanup_stale_uploads
+import wb_naming  # 命名规则唯一出处（sys.path 由 wb_sticker_ps 注入）
 
 BASE = Path(SOURCE_BASE)
 TORSO = Path(r"D:\Semems\1胚衣")
@@ -92,7 +93,7 @@ class BlackStickerSession:
 
     def place_one(self, side, cfg, inv_path, dx, upload, cut_meta=None):
         """贴一张黑T：直接复用 StickerSession 的路径模板 JSX。"""
-        output_name = f"{dx}_{side}黑T.jpg"
+        output_name = wb_naming.flat_name(dx, side, "黑")
         output_path = str(upload / output_name)
         torso_path = str(TORSO / cfg["torso_black"])
         self.sticker.place_design(inv_path, torso_path, output_path, cfg, cut_meta=cut_meta)
@@ -100,9 +101,9 @@ class BlackStickerSession:
 
     def bw_synth(self, dx, upload):
         """BW合成：用PS动作合并B和W（黑T版）。"""
-        b_img = str(upload / f"{dx}_B黑T.jpg")
-        w_img = str(upload / f"{dx}_W黑T.jpg")
-        out_path = str(upload / f"{dx}_黑BW.jpg")
+        b_img = str(upload / wb_naming.flat_name(dx, "B", "黑"))
+        w_img = str(upload / wb_naming.flat_name(dx, "W", "黑"))
+        out_path = str(upload / wb_naming.bw_name(dx, "黑"))
 
         if not os.path.exists(b_img) or not os.path.exists(w_img):
             return "⏭️ 缺少 B/W 黑T文件，跳过黑BW合成"

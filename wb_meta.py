@@ -510,7 +510,14 @@ def register_upload(upload_path: str | Path, uid: str, group_id: str, role: str,
 # ---------------------------------------------------------------------------
 
 def _extract_role_from_name(filename: str) -> str:
-    """从文件名推断 role"""
+    """从文件名推断 role（新命名规则见 wb_naming；失败回退旧逻辑）"""
+    try:
+        import wb_naming
+        role = wb_naming.role_from_name(filename)
+        if role != "?":
+            return role
+    except Exception:
+        pass
     stem = Path(filename).stem
     if stem.endswith("_cut"):
         stem = stem[:-4]

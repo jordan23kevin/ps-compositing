@@ -13,6 +13,9 @@ import config
 BASE = r"D:\Semems WB\02_PROJECTS"
 
 sys.path.insert(0, r"E:\Claude code\ps")
+sys.path.insert(0, r"D:\Semems WB\04_OS\engine")
+import wb_naming  # 命名规则唯一出处
+
 try:
     import wb_meta
 except Exception:
@@ -29,26 +32,8 @@ _MIGRATED_DX = set()
 
 
 def _role_from_name(name):
-    """从文件名推断 role（支持上传图 / BW 合成图 / 新平铺命名）"""
-    stem = os.path.splitext(name)[0]
-    if stem.endswith("_cut"):
-        stem = stem[:-4]
-    parts = stem.split("_")
-    last = parts[-1] if parts else ""
-    # 新平铺命名: {side}{color}T  例 W白T / B黑T（side=W/B, color=白/黑）
-    if len(last) == 3 and last[0] in "WB" and last[1] in "白黑" and last[2] == "T":
-        side, color = last[0], last[1]
-        return f"黑{side}" if color == "黑" else side
-    # 旧平铺命名(兼容): {side}_{color}T
-    if len(parts) >= 3 and parts[-1] in ("白T", "黑T"):
-        side = parts[-2]
-        torso = parts[-1]
-        if torso == "黑T":
-            return f"黑{side}"
-        return side
-    if len(parts) >= 2:
-        return parts[-1]
-    return "?"
+    """从文件名推断 role（规则见 wb_naming.role_from_name）"""
+    return wb_naming.role_from_name(name)
 
 
 def _infer_meta(path):
@@ -190,14 +175,14 @@ def process_dx(ps, dx_folder):
             log(f"  ⚠️ real_sides 解析失败: {e}")
 
     colors = [
-        ("白T", "白", f"{dx_folder}_白BW.jpg"),
-        ("黑T", "黑", f"{dx_folder}_黑BW.jpg"),
+        ("白T", "白", wb_naming.bw_name(dx_folder, "白")),
+        ("黑T", "黑", wb_naming.bw_name(dx_folder, "黑")),
     ]
 
     results = []
     for color, action_name, output_name in colors:
-        back_img = os.path.join(upload, f"{dx_folder}_B{color}.jpg")
-        front_img = os.path.join(upload, f"{dx_folder}_W{color}.jpg")
+        back_img = os.path.join(upload, wb_naming.flat_name(dx_folder, "B", action_name))
+        front_img = os.path.join(upload, wb_naming.flat_name(dx_folder, "W", action_name))
         out_path = os.path.join(upload, output_name)
 
         if single_side is not None:
@@ -213,7 +198,7 @@ def process_dx(ps, dx_folder):
             continue
 
         if not os.path.exists(back_img) or not os.path.exists(front_img):
-            log(f"  跳过{color}：缺少 {dx_folder}_B/W{color}.jpg")
+            log(f"  跳过{color}：缺少 {os.path.basename(back_img)} / {os.path.basename(front_img)}")
             results.append((color, False))
             continue
 

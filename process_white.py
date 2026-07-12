@@ -16,6 +16,7 @@ except Exception:
     wb_meta = None
 from config import SOURCE_BASE, parse_side_suffix
 from wb_sticker_ps import StickerSession, _role_from_name, cleanup_stale_uploads
+import wb_naming  # 命名规则唯一出处（sys.path 由 wb_sticker_ps 注入）
 
 BASE = Path(SOURCE_BASE)
 TORSO = Path(r"D:\Semems\1胚衣")
@@ -90,7 +91,7 @@ class WhiteStickerSession:
 
     def place_one(self, side, cfg, inv_path, dx, upload, cut_meta=None):
         """贴一张白T：使用白色胚衣。"""
-        output_name = f"{dx}_{side}白T.jpg"
+        output_name = wb_naming.flat_name(dx, side, "白")
         output_path = str(upload / output_name)
         torso_path = str(TORSO / cfg["torso_white"])
         self.sticker.place_design(inv_path, torso_path, output_path, cfg, cut_meta=cut_meta)
@@ -98,9 +99,9 @@ class WhiteStickerSession:
 
     def bw_synth(self, dx, upload):
         """BW合成：用PS动作合并B和W（白T版）。"""
-        b_img = str(upload / f"{dx}_B白T.jpg")
-        w_img = str(upload / f"{dx}_W白T.jpg")
-        out_path = str(upload / f"{dx}_白BW.jpg")
+        b_img = str(upload / wb_naming.flat_name(dx, "B", "白"))
+        w_img = str(upload / wb_naming.flat_name(dx, "W", "白"))
+        out_path = str(upload / wb_naming.bw_name(dx, "白"))
 
         if not os.path.exists(b_img) or not os.path.exists(w_img):
             return "⏭️ 缺少 B/W 白T文件，跳过白BW合成"

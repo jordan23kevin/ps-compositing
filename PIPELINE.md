@@ -256,7 +256,7 @@ done
 | 仓库 | tag | SHA |
 |---|---|---|
 | ZCodeProject | pipeline-2026-07-12 | 5d20b23fe3b5b87673ab5d54b7a040d995ae80b4 |
-| ps-compositing | pipeline-2026-07-12 | pipeline-2026-07-12（本仓库里程碑 tag，即本次提交） |
+| ps-compositing | pipeline-2026-07-12-v2.5.0 | 40e73ad23dff2be15782456d66fb3fcf17ffde84 |
 | white_t_mockup | pipeline-2026-07-12-wtm | e61cc5a16ece8691f7f716c4d42215a96528e239 |
 | 04_OS | pipeline-2026-07-12 | bfdf71f8af7a803aa895b5708f724231083ae32e |
 

@@ -1,11 +1,15 @@
-# ===== WB 贴图主控 v2.5.0（纯软件，不再依赖 Photoshop） =====
+# ===== WB 贴图主控 v2.5.1（纯软件，不再依赖 Photoshop） =====
+# 变更 v2.5.1（2026-07-12）：
+#   - 黑胚衣落点 black_optimize 改回 False（用户确认黑衫就要「不加白墨打底」的
+#     效果，与其批准的 DX0648_W黑T_五参黑W11 / _v_现在代码(topcenter,-meta) 一致）。
+#     白墨打底（v2.4.1）保留在 black_opt.py，仅当用户后续要求「防黑衫发暗」时按需开启。
 # 变更 v2.5.0（2026-07-12）：
 #   - 平铺图定位改为「素材库五参驱动」：place_design 优先读取胚衣同名
 #     .meta.json（width/height/rotation/highest_y/center_x），按素材库 黑W11/白W11/
 #     白B12/黑B7 的真实尺寸贴图，彻底替代 config.FRONT_NEW/BACK_NEW 写死的
 #     scale/center（旧 13.33% 把图缩成胸口小标、位置偏右）。
 #   - config 新增 MATERIAL_BASE / FLAT_TORSO / flat_torso() / load_meta()；
-#     process_dx_folder 经 flat_torso 取底图 + 五参，黑胚衣落点仍 black_optimize=True。
+#     process_dx_folder 经 flat_torso 取底图 + 五参，黑胚衣落点按本版默认 black_optimize=False。
 #   - 经像素比对，素材库胚衣与旧 1胚衣 为同一件衣服（JPEG 重编码差 <1/255），
 #     切换底图不改变成品外观，仅修正定位。
 # 变更 v2.4.1（2026-07-12）：
@@ -45,7 +49,7 @@ except Exception:
 
 ALPHA_THRESHOLD = 20
 
-VERSION = "2.5.0"
+VERSION = "2.5.1"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）
@@ -417,12 +421,12 @@ def process_dx_folder(dx_folder, session=None):
                     print("  → 生成 W 正面文件（五参定位）...")
                     _run("W", "白", False)
                 if not has_black:
-                    _run("W", "黑", True)
+                    _run("W", "黑", False)
                 if not has_white:
                     print("  → 生成 B 背面文件（五参定位）...")
                     _run("B", "白", False)
                 if not has_black:
-                    _run("B", "黑", True)
+                    _run("B", "黑", False)
                 print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
 
             elif design_type == "W":
@@ -430,14 +434,14 @@ def process_dx_folder(dx_folder, session=None):
                 if not has_white:
                     _run("W", "白", False)
                 if not has_black:
-                    _run("W", "黑", True)
+                    _run("W", "黑", False)
 
             elif design_type == "B":
                 # ===== B 类型：背图五参定位 =====
                 if not has_white:
                     _run("B", "白", False)
                 if not has_black:
-                    _run("B", "黑", True)
+                    _run("B", "黑", False)
 
         dt_dx = time.time() - t_dx
         print(f"⏱️  {dx_name} 完成，耗时 {dt_dx:.1f}秒")

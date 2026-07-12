@@ -60,7 +60,7 @@
 | 仓库 | 本地路径 | 远程 | 分支 | 本次版本 | 角色 |
 |---|---|---|---|---|---|
 | ZCodeProject | `C:\Users\Administrator\ZCodeProject` | `github.com/jordan23kevin/ZCodeProject.git` | master | bridge v2.3.23 | 大脑/编排（lovart_bridge + check_rem） |
-| ps-compositing | `E:\Claude code\ps` | `github.com/jordan23kevin/ps-compositing.git` | master | **v2.5.0** | 平铺图贴花 + BW 合成（纯 PIL） |
+| ps-compositing | `E:\Claude code\ps` | `github.com/jordan23kevin/ps-compositing.git` | master | **v2.5.1** | 平铺图贴花 + BW 合成（纯 PIL） |
 | white_t_mockup | `E:\Kimi Code\white_t_mockup` | （本地） | white-t-mockup | **v1.8.0** | 模特图贴图引擎（gradient + 布料同步明度） |
 | 04_OS | `D:\Semems WB\04_OS` | `github.com/.../semems-wb-04os.git` | master | w_mockup_extra v2.4 | 命名规则 + 生产参数 |
 
@@ -155,6 +155,7 @@
 `wb_sticker_ps.place_design` 新增 `black_optimize` 开关：当通用/白版设计图没有对应 `_黑*_cut.png` 专用文件、必须直接贴在黑胚衣上时，自动调用 `black_opt.black_shirt_print_optimize`（自适应白墨打底 + 暗部提亮 + 饱和补偿）。这能避免通用图的半透明边缘/纹理与黑色胚衣混合导致的「边缘发暗、文字发脏」。
 - 仅对 `process_dx_folder` 的 4 个黑胚衣落点（W黑T×2、B黑T×2）开启；
 - 白胚衣落点、已有 `_黑B/_黑W/_黑BW_cut.png` 专用款均不受影响（专用款由 `process_black.py` 处理，已优化）。
+- **v2.5.1 起用户确认黑衫就要「不加白墨打底」的效果**（与其批准的 `DX0648_W黑T_五参黑W11` / `_v_现在代码(topcenter,-meta)` 参考图一致），黑胚衣落点 `black_optimize` 改回 **False**。`black_opt.py` 保留，后续若需防黑衫发暗可再开启。
 
 ---
 

@@ -77,7 +77,7 @@ def _dx_from_path(path: str | Path) -> Optional[str]:
     try:
         rel = p.relative_to(PROJECTS_DIR)
         parts = rel.parts
-        if parts and re.match(r"^DX\d+$", parts[0]):
+        if parts and re.match(r"^DX\d+(?:BW|B|W)?$", parts[0]):
             return parts[0]
     except ValueError:
         pass
@@ -624,7 +624,7 @@ def migrate_all_projects():
     if not PROJECTS_DIR.exists():
         return
     for d in sorted(PROJECTS_DIR.iterdir()):
-        if d.is_dir() and re.match(r"^DX\d+$", d.name):
+        if d.is_dir() and re.match(r"^DX\d+(?:BW|B|W)?$", d.name):
             try:
                 migrate_dx(d)
                 print(f"[wb_meta] OK migrate: {d.name}")

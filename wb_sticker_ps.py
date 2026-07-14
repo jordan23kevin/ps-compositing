@@ -1,4 +1,10 @@
-# ===== WB 贴图主控 v2.5.1（纯软件，不再依赖 Photoshop） =====
+# ===== WB 贴图主控 v2.5.2（纯软件，不再依赖 Photoshop） =====
+# 变更 v2.5.2（2026-07-13）：
+#   - 正面胚衣（W白/白W11、W黑/黑W11）支持「双组五参」：素材库 .meta.json 顶层五参
+#     用于① 单面款（只有W贴图），新增 "bw" 子块五参用于② 双面款（有W+B贴图）。
+#   - process_dx_folder 按产品类型自动选组：单面款(W)用顶层、双面款(BW)正面用 bw 块；
+#     双面款缺 bw 第二组直接报错（不偷偷用第一组兜底，强制两组都填）。
+#   - 背面胚衣（B白/B黑）只一组，行为不变。
 # 变更 v2.5.1（2026-07-12）：
 #   - 黑胚衣落点 black_optimize 改回 False（用户确认黑衫就要「不加白墨打底」的
 #     效果，与其批准的 DX0648_W黑T_五参黑W11 / _v_现在代码(topcenter,-meta) 一致）。
@@ -49,7 +55,7 @@ except Exception:
 
 ALPHA_THRESHOLD = 20
 
-VERSION = "2.5.1"
+VERSION = "2.5.2"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）
@@ -361,6 +367,46 @@ def cleanup_stale_uploads(dx_folder):
     return removed
 
 
+# 平铺图五参：单面款(只有W)用顶层五参，双面款(W+B)正面用 "bw" 第二套。
+_FLAT_KEYS = ["width", "height", "rotation", "highest_y", "center_x"]
+
+
+def _select_meta(full_meta, meta_set="w"):
+    """从素材库 .meta.json 选出本次贴图用的五参。
+
+    meta_set=="w"  -> 顶层五参（① 单面款 / 只有W贴图）
+    meta_set=="bw" -> "bw" 子块（② 双面款 / 有W+B贴图）
+    双面款要求第二组必须填：缺失/非数字/为0 直接报错，不偷偷用第一组兜底。
+    """
+    if not isinstance(full_meta, dict):
+        full_meta = {}
+    if meta_set == "bw":
+        bw = full_meta.get("bw")
+        if not isinstance(bw, dict):
+            raise ValueError("缺少双面款(W+B)第二组参数「bw」，请到素材库填写")
+        sel = {}
+        for k in _FLAT_KEYS:
+            v = bw.get(k)
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                raise ValueError(f"双面款(W+B)第二组参数「{k}」无效，请到素材库填写")
+            if v == 0:
+                raise ValueError(f"双面款(W+B)第二组参数「{k}」为0，请到素材库填写")
+            sel[k] = v
+        return sel
+    # 顶层 = 单面款（缺省回退 0，与旧行为一致）
+    sel = {}
+    for k in _FLAT_KEYS:
+        v = full_meta.get(k)
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            v = 0.0
+        sel[k] = v
+    return sel
+
+
 def process_dx_folder(dx_folder, session=None):
     """处理单个 DX 文件夹，返回耗时（秒）。session 为 None 时内部创建。"""
     dx_name = os.path.basename(dx_folder)
@@ -379,12 +425,18 @@ def process_dx_folder(dx_folder, session=None):
 
     # 五参定位：place_design 接收素材库 .meta.json，按胚衣真实尺寸贴图
     # （不再用 config.FRONT_NEW/BACK_NEW 写死的 scale/center）
-    def _run(side, color, black_opt):
+    # meta_set: "w"=单面款用顶层第一组；"bw"=双面款正面用 bw 第二套（缺则报错）
+    def _run(side, color, black_opt, meta_set="w"):
         torso_p, meta_p = config.flat_torso(side, color)
+        full = config.load_meta(meta_p) or {}
+        try:
+            meta = _select_meta(full, meta_set)
+        except ValueError as e:
+            raise ValueError(f"{side}{color} 胚衣: {e}")
         session.place_design(
             design_path, torso_p,
             os.path.join(upload_folder, wb_naming.flat_name(dx_name, side, color)),
-            meta=config.load_meta(meta_p),
+            meta=meta,
             black_optimize=black_opt, cut_meta=cut_meta,
         )
 
@@ -418,30 +470,30 @@ def process_dx_folder(dx_folder, session=None):
             if design_type == "BW":
                 # ===== BW 类型：生成 W 和 B 两套文件，供 ps_batch.py 合成 =====
                 if not has_white:
-                    print("  → 生成 W 正面文件（五参定位）...")
-                    _run("W", "白", False)
+                    print("  → 生成 W 正面文件（双面款W+B第二组五参）...")
+                    _run("W", "白", False, "bw")
                 if not has_black:
-                    _run("W", "黑", False)
+                    _run("W", "黑", False, "bw")
                 if not has_white:
                     print("  → 生成 B 背面文件（五参定位）...")
-                    _run("B", "白", False)
+                    _run("B", "白", False, "w")
                 if not has_black:
-                    _run("B", "黑", False)
+                    _run("B", "黑", False, "w")
                 print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
 
             elif design_type == "W":
-                # ===== W 类型：正图五参定位 =====
+                # ===== W 类型：正图五参定位（单面款，用顶层第一组）=====
                 if not has_white:
-                    _run("W", "白", False)
+                    _run("W", "白", False, "w")
                 if not has_black:
-                    _run("W", "黑", False)
+                    _run("W", "黑", False, "w")
 
             elif design_type == "B":
-                # ===== B 类型：背图五参定位 =====
+                # ===== B 类型：背图五参定位（背面只一组）=====
                 if not has_white:
-                    _run("B", "白", False)
+                    _run("B", "白", False, "w")
                 if not has_black:
-                    _run("B", "黑", False)
+                    _run("B", "黑", False, "w")
 
         dt_dx = time.time() - t_dx
         print(f"⏱️  {dx_name} 完成，耗时 {dt_dx:.1f}秒")

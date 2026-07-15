@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+
+# 临时测试产物（贴图调试时生成的源图，非仓库内容）
+_t2_src.png
+_t3_src.png

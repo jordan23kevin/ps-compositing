@@ -1,5 +1,14 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.5.4 — 2026-07-15（五参 contain 缩放 + BW 双面款 bw② 修正）
+
+- **wb_sticker_ps.py v2.5.4**
+  - **contain 缩放**：`place_design` 的 `scale` 由旧 `width/tw`（硬拉宽度）改为 `min(width/tw, height/th)`。五参 `width/height` 是"框"，贴图最长边≤框、另一边等比缩放（如白B12 缩放后 546×546）。`height=0` 时退化为旧行为兼容单面款。修复又高又大的设计（如 DX0694BW 背面）被拉得"大得离谱占满整个后背"的问题。
+  - **BW 双面款正面读 bw② 五参**：`classify_design` 旧逻辑 `"_BW" in base` 不匹配 BW 款**拆开命名**的 cut 文件（`DXxxxxBW_W_cut.png`/`DXxxxxBW_B_cut.png`，款号带 BW、BW 前无下划线）→ 误判单面款、没读 `bw` 块。改为判「款号首段 endswith BW/WB」即双面款；`process_dx_folder` BW 分支加 `is_split_w` 防背面被正面图覆盖。
+  - 验证：重生成 DX0694BW/DX0696BW，背面从 546 宽占满 → 317×546 居中；黑W11/白W11 正确走 bw②。
+
+## v2.5.3 — 2026-07-15（BW 双面款正面 bw② 初版，见 v2.5.4 合并说明）
+
 ## v2.5.2 — 2026-07-13（正面胚衣双组五参：单面款 / 双面款W+B）
 
 - **wb_sticker_ps.py v2.5.2**

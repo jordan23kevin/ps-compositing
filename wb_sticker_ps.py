@@ -1,4 +1,21 @@
 # ===== WB 贴图主控 v2.5.2（纯软件，不再依赖 Photoshop） =====
+# 变更 v2.5.4（2026-07-15）：
+#   - place_design 五参缩放从「硬拉宽度到 width」改为「等比适应(contain)」：
+#     width/height 视为一个框，设计图最长边不超过框，另一边同比例缩放。
+#     即 scale = min(width/tw, height/th)。
+#   - 效果：又高又大的设计（如 DX0694BW 背面 CHOSEN 1099×1894 缩到 317×546）
+#     不再把后背占满；宽图仍按宽度缩，高图按高度缩。
+#   - 当 meta 中 height=0 时仍退回到旧行为 width-only，保证单面款/历史五参兼容。
+# 变更 v2.5.3（2026-07-15）：
+#   - 修复 classify_design 对「拆开命名」双面款(BW)的误判：实际 cut 文件为
+#     DXxxxxBW_W_cut.png / DXxxxxBW_B_cut.png（款号本身带 BW，BW 前无下划线），
+#     原判定 "_BW" in base 永远不匹配，导致被误判成单面款(W/B)，正面黑W11/白W11
+#     始终走顶层①(546) 而非 bw ②(245) —— 即「双面款尺寸不对」根因。
+#   - 改为：款号首段 endswith BW/WB 即视为双面款，其 W 面 cut → "BW"（正面用 bw ②）、
+#     B 面 cut → "B"（背面用顶层①）；保留旧 "_BW"/"_WB" 单 cut 命名兼容。
+#   - process_dx_folder 的 BW 分支增加 is_split_w 判定：拆开的 W 面 cut 只生成正面
+#     （bw ②），背面由 B 面 cut 负责，避免背面被正面图覆盖。
+#   - 效果：BW 款贴图时，黑W11.jpg 与 白W11.jpg 各自读取自己的 "bw" ② 五参。
 # 变更 v2.5.2（2026-07-13）：
 #   - 正面胚衣（W白/白W11、W黑/黑W11）支持「双组五参」：素材库 .meta.json 顶层五参
 #     用于① 单面款（只有W贴图），新增 "bw" 子块五参用于② 双面款（有W+B贴图）。
@@ -184,7 +201,15 @@ class StickerSession:
 
         # 定位参数：meta 优先（素材库五参），否则回退 config
         if meta is not None:
-            scale = (meta["width"] / tw) if tw else 1.0
+            target_w = float(meta["width"])
+            target_h = float(meta.get("height", 0) or 0)
+            if target_h > 0 and th:
+                # 等比适应(contain)：设计图最长边不超过框(width×height)，另一边同比例缩放。
+                # 例：框 546×546、设计又高又大(如 1297×1675) → 缩到 423×546，不再占满后背。
+                scale = min(target_w / tw, target_h / th)
+            else:
+                # 旧行为：只约束宽度（顶层五参 height=0 的单面款保持原样）
+                scale = (target_w / tw) if tw else 1.0
             rot = -meta["rotation"]
             target_cx = meta["center_x"]
             target_top_y = meta["highest_y"]
@@ -255,9 +280,21 @@ def classify_design(filename):
     W → 只做正面
     """
     base = os.path.splitext(filename)[0]
+    # 款号本身是否为双面款（DXxxxxBW / DXxxxxWB）：其 W/B 两个 cut 都属于双面款，
+    # 正面(W) cut 需走「bw 第二套五参」，背面(B) cut 走顶层第一组。
+    dx = base.split("_")[0]
+    is_bw_dx = dx.endswith("BW") or dx.endswith("WB")
 
     if "_BW_" in base or "_BW" in base or "_WB_" in base or "_WB" in base:
         return "BW"
+    if is_bw_dx:
+        # 双面款拆成 W/B 两个 cut（如 DXxxxxBW_W_cut.png / DXxxxxBW_B_cut.png）：
+        #   W 面 cut → 正面（bw 第二套）；B 面 cut → 背面（顶层）。
+        if "_W" in base:
+            return "BW"
+        if "_B" in base:
+            return "B"
+        return "BW"  # 无 W/B 后缀的单 BW cut（两面都做）
     elif "_B_" in base or "_B" in base:
         return "B"
     elif "_W_" in base or "_W" in base:
@@ -453,6 +490,7 @@ def process_dx_folder(dx_folder, session=None):
             print(f"\n处理: {file}")
             design_path = os.path.join(rem_bg_folder, file)
             design_type = classify_design(file)
+            base = os.path.splitext(file)[0]
             cut_meta = _get_cut_meta(design_path)
 
             # 如果存在对应的黑版专用文件，则通用图不再用于黑T
@@ -468,17 +506,22 @@ def process_dx_folder(dx_folder, session=None):
                 print(f"  发现白版专用 {white_file}，通用图不输出白T")
 
             if design_type == "BW":
-                # ===== BW 类型：生成 W 和 B 两套文件，供 ps_batch.py 合成 =====
+                # ===== BW 类型：正面(W)用 bw 第二套五参，背面(B)用顶层第一组 =====
+                # 双面款拆成 W/B 两个 cut（DXxxxxBW_W_cut.png / DXxxxxBW_B_cut.png）时，
+                # W 面 cut 只生成正面、B 面 cut 只生成背面，避免背面被正面图覆盖。
+                dx_is_bw = dx_name.endswith("BW") or dx_name.endswith("WB")
+                is_split_w = dx_is_bw and "_W" in base
                 if not has_white:
                     print("  → 生成 W 正面文件（双面款W+B第二组五参）...")
                     _run("W", "白", False, "bw")
                 if not has_black:
                     _run("W", "黑", False, "bw")
-                if not has_white:
-                    print("  → 生成 B 背面文件（五参定位）...")
-                    _run("B", "白", False, "w")
-                if not has_black:
-                    _run("B", "黑", False, "w")
+                if not is_split_w:
+                    if not has_white:
+                        print("  → 生成 B 背面文件（五参定位）...")
+                        _run("B", "白", False, "w")
+                    if not has_black:
+                        _run("B", "黑", False, "w")
                 print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
 
             elif design_type == "W":

@@ -177,7 +177,16 @@ def calculate_sticker_position(png_path):
 # 保存图片，确保文件大小不超过 max_size_mb（默认 2MB）
 # 从 quality=100 开始逐步降 1，直到刚好低于限制，分辨率始终不变
 # 最低降到 85，避免过度压缩
-def save_with_size_limit(img, output_path, max_size_mb=2.0):
+def save_with_size_limit(img, output_path, max_size_mb=2.0, min_quality=92):
+    for q in range(100, min_quality - 1, -1):
+        img.save(output_path, "JPEG", quality=q, optimize=True)
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        if size_mb <= max_size_mb:
+            if q < 100:
+                print(f"  ⚠️ 质量降至 {q} 以满足 < {max_size_mb}MB: {os.path.basename(output_path)} ({size_mb:.2f}MB)")
+            return
+    # 如果降到 min_quality 还是超，保持 min_quality 并打印警告
+    print(f"  ⚠️ 警告: 即使 quality={min_quality} 仍超过 {max_size_mb}MB: {os.path.basename(output_path)}")
     for q in range(100, 84, -1):
         img.save(output_path, "JPEG", quality=q, optimize=True)
         size_mb = os.path.getsize(output_path) / (1024 * 1024)

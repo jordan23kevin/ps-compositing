@@ -92,7 +92,7 @@ except Exception:
 
 ALPHA_THRESHOLD = 20
 
-VERSION = "2.5.2"
+VERSION = "2.5.5"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）
@@ -269,7 +269,7 @@ class StickerSession:
                 os.remove(output_path)
             except Exception:
                 pass
-        out.convert("RGB").save(output_path, "JPEG", quality=100, optimize=True, subsampling=0)
+        out.convert("RGB").save(output_path, "JPEG", quality=95, optimize=True)
         print(f"✅ 生成: {output_path}")
 
         # 元数据注册（与原实现一致）

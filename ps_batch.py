@@ -31,7 +31,7 @@ try:
 except Exception:
     real_sides = None
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 _MIGRATED_DX = set()
 
@@ -175,7 +175,7 @@ def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
         base.paste(shadow, (sx, sy), shadow)
 
     base.paste(full, (cx - radius - border_width, cy - radius - border_width), full)
-    base.convert("RGB").save(out_path, quality=100, optimize=True, subsampling=0)
+    base.convert("RGB").save(out_path, quality=95, optimize=True)
     return out_path
 
 

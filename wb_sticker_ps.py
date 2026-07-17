@@ -174,6 +174,22 @@ def calculate_sticker_position(png_path):
     }
 
 
+# 保存图片，确保文件大小不超过 max_size_mb（默认 2MB）
+# 如果初始质量下超过限制，逐步降低 quality 直到满足，分辨率始终不变
+_SAVE_QUALITIES = [95, 90, 85, 80, 75, 70]
+
+
+def save_with_size_limit(img, output_path, max_size_mb=2.0):
+    for q in _SAVE_QUALITIES:
+        img.save(output_path, "JPEG", quality=q, optimize=True)
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        if size_mb <= max_size_mb:
+            if q < _SAVE_QUALITIES[0]:
+                print(f"  ⚠️ 质量降至 {q} 以满足 < {max_size_mb}MB: {os.path.basename(output_path)}")
+            return
+    print(f"  ⚠️ 警告: 即使 quality={_SAVE_QUALITIES[-1]} 仍超过 {max_size_mb}MB: {os.path.basename(output_path)}")
+
+
 # ---------------------------------------------------------------------------
 # 平铺图贴花会话：纯软件实现（不再依赖 Photoshop）
 # 复刻原 place_design.jsx 的 affine 变换：trim → 缩放 → 平移 → 绕中心旋转 → normal 合成
@@ -269,7 +285,7 @@ class StickerSession:
                 os.remove(output_path)
             except Exception:
                 pass
-        out.convert("RGB").save(output_path, "JPEG", quality=95, optimize=True)
+        save_with_size_limit(out.convert("RGB"), output_path, max_size_mb=2.0)
         print(f"✅ 生成: {output_path}")
 
         # 元数据注册（与原实现一致）

@@ -27,9 +27,10 @@ try:
 except Exception:
     wb_meta = None
 try:
-    from wb_sticker_ps import real_sides
+    from wb_sticker_ps import real_sides, save_with_size_limit
 except Exception:
     real_sides = None
+    save_with_size_limit = None
 
 VERSION = "2.0.1"
 
@@ -175,7 +176,10 @@ def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
         base.paste(shadow, (sx, sy), shadow)
 
     base.paste(full, (cx - radius - border_width, cy - radius - border_width), full)
-    base.convert("RGB").save(out_path, quality=95, optimize=True)
+    if save_with_size_limit:
+        save_with_size_limit(base.convert("RGB"), out_path, max_size_mb=2.0)
+    else:
+        base.convert("RGB").save(out_path, quality=95, optimize=True)
     return out_path
 
 

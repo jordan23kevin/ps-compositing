@@ -58,8 +58,28 @@ from PIL import Image
 import numpy as np
 import config
 
-# 确保 Windows 控制台能输出中文/emoji
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# 确保 Windows 控制台能输出中文/emoji，同时防止桥接进程的 stdout 句柄已关闭导致 print 崩溃
+class _SafeStream:
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, s):
+        try:
+            self._stream.write(s)
+        except Exception:
+            pass
+
+    def flush(self):
+        try:
+            self._stream.flush()
+        except Exception:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+sys.stdout = _SafeStream(io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8'))
 
 sys.path.insert(0, r"E:\Claude code\ps")
 sys.path.insert(0, r"D:\Semems WB\04_OS\engine")

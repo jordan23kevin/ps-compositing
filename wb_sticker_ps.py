@@ -84,6 +84,7 @@ sys.stdout = _SafeStream(io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8'))
 sys.path.insert(0, r"E:\Claude code\ps")
 sys.path.insert(0, r"D:\Semems WB\04_OS\engine")
 import wb_naming  # 命名规则唯一出处
+import w_mockup_extra  # 颜色枚举/中英映射复用（04_OS engine，无循环依赖）
 
 try:
     import wb_meta
@@ -92,7 +93,7 @@ except Exception:
 
 ALPHA_THRESHOLD = 20
 
-VERSION = "2.6.0"
+VERSION = "2.6.1"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）
@@ -519,6 +520,51 @@ def _select_meta(full_meta, meta_set="w"):
     return sel
 
 
+def _flat_torso_paths(side: str, color: str):
+    """返回 (torso_abs_path, meta_abs_path)，支持白/黑 + 中文色（卫衣英文目录动态映射）。
+
+    白/黑 → config.FLAT_TORSO 表（T恤/卫衣各自的 2 号平铺胚衣）；
+    中文色（蜜瓜橙…）→ MATERIAL_BASE/{side} {英文名}/ 下 2 号平铺胚衣
+    （stem 去空格后以 "2" 结尾，兼容 " B2.jpg" 带前导空格；meta 与 jpg 同名）。
+    找不到抛 ValueError。"""
+    if color in ("白", "黑"):
+        return config.flat_torso(side, color)
+    en = w_mockup_extra._CN_TO_EN_COLOR.get(color)
+    if not en:
+        raise ValueError(f"素材库无颜色「{color}」")
+    cat = Path(config.MATERIAL_BASE) / f"{side} {en}"
+    if not cat.is_dir():
+        raise ValueError(f"素材目录不存在: {cat}")
+    for p in sorted(cat.iterdir()):
+        if not p.is_file() or p.suffix.lower() not in (".jpg", ".jpeg"):
+            continue
+        if not p.stem.strip().endswith("2"):
+            continue
+        mp = p.with_name(p.stem + ".meta.json")  # 与 jpg 同名（含前导空格）
+        if mp.exists():
+            return str(p), str(mp)
+    raise ValueError(f"{cat.name} 缺 2 号平铺胚衣(带meta)")
+
+
+def _flat_colors(side: str, require_bw: bool = False) -> list[str]:
+    """素材库该面全部可用颜色（白/黑 + 中文色）。
+
+    require_bw=True 时只留 meta 含 "bw" 块的颜色（BW 款正面用第二组五参）。
+    无 2 号平铺胚衣 / meta 缺失 / 缺 bw 块的颜色自动跳过（不中断整款）。"""
+    out = []
+    for color in w_mockup_extra._list_embryo_colors(side):
+        try:
+            _, mp = _flat_torso_paths(side, color)
+        except Exception:
+            continue
+        if require_bw:
+            meta = config.load_meta(mp) or {}
+            if not isinstance(meta.get("bw"), dict):
+                continue
+        out.append(color)
+    return out
+
+
 def process_dx_folder(dx_folder, session=None):
     """处理单个 DX 文件夹，返回耗时（秒）。session 为 None 时内部创建。"""
     dx_name = os.path.basename(dx_folder)
@@ -539,7 +585,7 @@ def process_dx_folder(dx_folder, session=None):
     # （不再用 config.FRONT_NEW/BACK_NEW 写死的 scale/center）
     # meta_set: "w"=单面款用顶层第一组；"bw"=双面款正面用 bw 第二套（缺则报错）
     def _run(side, color, black_opt, meta_set="w"):
-        torso_p, meta_p = config.flat_torso(side, color)
+        torso_p, meta_p = _flat_torso_paths(side, color)
         full = config.load_meta(meta_p) or {}
         try:
             meta = _select_meta(full, meta_set)
@@ -584,34 +630,37 @@ def process_dx_folder(dx_folder, session=None):
                 # ===== BW 类型：正面(W)用 bw 第二套五参，背面(B)用顶层第一组 =====
                 # 双面款拆成 W/B 两个 cut（DXxxxxBW_W_cut.png / DXxxxxBW_B_cut.png）时，
                 # W 面 cut 只生成正面、B 面 cut 只生成背面，避免背面被正面图覆盖。
+                # 颜色=素材库该面全部带五参颜色（黑白+中文色）；正面需 bw 块，背面用顶层。
                 dx_is_bw = dx_name.endswith("BW") or dx_name.endswith("WB")
                 is_split_w = dx_is_bw and "_W" in base
-                if not has_white:
-                    print("  → 生成 W 正面文件（双面款W+B第二组五参）...")
-                    _run("W", "白", False, "bw")
-                if not has_black:
-                    _run("W", "黑", False, "bw")
+                w_colors = _flat_colors("W", require_bw=True)
+                b_colors = _flat_colors("B")
+                for color in w_colors:
+                    if (color == "白" and has_white) or (color == "黑" and has_black):
+                        continue  # 黑白有专用 cut，通用图不再输出
+                    print(f"  → 生成 W 正面文件（{color}，双面款W+B第二组五参）...")
+                    _run("W", color, False, "bw")
                 if not is_split_w:
-                    if not has_white:
-                        print("  → 生成 B 背面文件（五参定位）...")
-                        _run("B", "白", False, "w")
-                    if not has_black:
-                        _run("B", "黑", False, "w")
+                    for color in b_colors:
+                        if (color == "白" and has_white) or (color == "黑" and has_black):
+                            continue
+                        print(f"  → 生成 B 背面文件（{color}，五参定位）...")
+                        _run("B", color, False, "w")
                 print("  ✅ BW 准备完成，可运行 ps_batch.py 合成最终 BW 图！")
 
             elif design_type == "W":
                 # ===== W 类型：正图五参定位（单面款，用顶层第一组）=====
-                if not has_white:
-                    _run("W", "白", False, "w")
-                if not has_black:
-                    _run("W", "黑", False, "w")
+                for color in _flat_colors("W"):
+                    if (color == "白" and has_white) or (color == "黑" and has_black):
+                        continue
+                    _run("W", color, False, "w")
 
             elif design_type == "B":
                 # ===== B 类型：背图五参定位（背面只一组）=====
-                if not has_white:
-                    _run("B", "白", False, "w")
-                if not has_black:
-                    _run("B", "黑", False, "w")
+                for color in _flat_colors("B"):
+                    if (color == "白" and has_white) or (color == "黑" and has_black):
+                        continue
+                    _run("B", color, False, "w")
 
         dt_dx = time.time() - t_dx
         print(f"⏱️  {dx_name} 完成，耗时 {dt_dx:.1f}秒")

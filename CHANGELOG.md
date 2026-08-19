@@ -1,5 +1,14 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.6.1 — 2026-08-19（BW/单面款平铺贴图出全部带五参颜色）
+
+- **wb_sticker_ps.py**：`process_dx_folder` 的 BW/W/B 三个分支颜色遍历从「白/黑」扩展为「素材库该面全部带五参颜色」：
+  - 新增 `_flat_colors(side, require_bw=False)`：复用 `w_mockup_extra._list_embryo_colors`（04_OS engine，ps 链共享）枚举白/黑+中文色（蜜瓜橙…）；`require_bw=True` 只留 meta 含 `bw` 块的颜色（BW 款正面用第二组五参）；无 2 号平铺胚衣/meta 缺失的颜色自动跳过不中断。
+  - 新增 `_flat_torso_paths(side, color)`：白/黑走 `config.flat_torso` 表；中文色动态找 `MATERIAL_BASE/{side} {英文}/` 的 2 号平铺胚衣（stem 去空格以 "2" 结尾，兼容 ` B2.jpg` 前导空格；meta 与 jpg 同名）。
+  - 黑白专用 cut（`_黑/_白`）逻辑保留：英文色无专用 cut，始终用通用 cut 贴。
+  - T恤 行为不变（素材库无英文色目录，仍只白/黑）。
+- 验证：重跑 `ps_sticker_one.py HX0003BW` → 03_UPLOAD 产出 **20 张**（W 面 10 色 + B 面 10 色，黑白+8 中文色，均带五参），抽查成品 1340×1785 亮度正常。
+
 ## v2.6.0 — 2026-08-19（manual 遮罩探测兼容英文色带空格胚衣名 + VERSION 同步）
 
 - **wb_sticker_ps.py**：`_apply_manual_top` 探测 `<胚衣名>_manual.png` 时，先试 `{stem}_manual.png`（与胚衣命名一致），找不到再试 `{stem.strip()}_manual.png`（去前导空格）——英文色文件夹胚衣是 ` B2.jpg`（带前导空格），用户手动保存的遮罩通常是不带空格的 `B2_manual.png`，此前探测 ` B2_manual.png` 永远找不到、遮罩静默不生效。

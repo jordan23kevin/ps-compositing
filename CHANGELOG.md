@@ -1,5 +1,11 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.5.7 — 2026-08-19（卫衣 BW 款贴图修复：rotation=0 误判 + HX 前缀元数据）
+
+- **wb_sticker_ps.py**：`_select_meta`（bw 第二套五参）此前对所有 key 判「为 0 即未填写」→ `rotation=0`（不旋转，合法）被误判抛错，导致卫衣 BW 款（白W2/黑W2 的 bw 块 rotation=0）贴图失败（用户报 `HX0003BW: 平铺图贴图执行失败`）。修复：**仅 width/height 强制 >0**，rotation/highest_y/center_x 允许 0。
+- **wb_meta.py**：`_dx_from_path` 正则写死 `^DX\d+` → 卫衣(HX)路径返回 None → `ensure_meta` 里 `PROJECTS_DIR / None` 崩溃（migrate_dx 失败，仅打印 ⚠️ 不影响主流程）。修复：按 `SEMEMS_ROOT` 推断前缀（HX/DX）。
+- 验证：重跑 `ps_sticker_one.py HX0003BW` → 成功产出 `HX0003BW_W白T/W黑T/B白T/B黑T.jpg` 4 张平铺图，migrate ⚠️ 消失。
+
 ## v2.5.6 — 2026-08-19（FLAT_TORSO 按品类：卫衣用各色 2 号平铺胚衣）
 
 - **config.py**

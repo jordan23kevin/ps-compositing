@@ -472,7 +472,8 @@ def _select_meta(full_meta, meta_set="w"):
                 v = float(v)
             except (TypeError, ValueError):
                 raise ValueError(f"双面款(W+B)第二组参数「{k}」无效，请到素材库填写")
-            if v == 0:
+            # 仅 width/height 必须 >0；rotation=0（不旋转）/highest_y=0/center_x=0 合法
+            if k in ("width", "height") and v <= 0:
                 raise ValueError(f"双面款(W+B)第二组参数「{k}」为0，请到素材库填写")
             sel[k] = v
         return sel

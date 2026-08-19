@@ -32,7 +32,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-BASE_DIR = Path("D:/Semems WB")
+BASE_DIR = Path(os.environ.get("SEMEMS_ROOT", "D:/Semems WB"))
 PROJECTS_DIR = BASE_DIR / "02_PROJECTS"
 META_DIR = BASE_DIR / "05_META"
 
@@ -72,13 +72,17 @@ def _read_json(path: Path, default=None) -> dict:
 
 
 def _dx_from_path(path: str | Path) -> Optional[str]:
-    """从图片路径推断 DX 名（如 02_PROJECTS/DX0274/01_AI/xxx.png -> DX0274）"""
+    """从图片路径推断 DX 名（如 02_PROJECTS/DX0274/01_AI/xxx.png -> DX0274）。
+    按品类前缀（SEMEMS_ROOT 推断 DX/HX）匹配，支持卫衣 HX 款。"""
     p = Path(path).resolve()
     try:
         rel = p.relative_to(PROJECTS_DIR)
         parts = rel.parts
-        if parts and re.match(r"^DX\d+(?:BW|B|W)?$", parts[0]):
-            return parts[0]
+        if parts:
+            root = os.environ.get("SEMEMS_ROOT", "")
+            prefix = "HX" if "Hoodie" in root else "DX"
+            if re.match(rf"^{re.escape(prefix)}\d+(?:BW|B|W)?$", parts[0]):
+                return parts[0]
     except ValueError:
         pass
     return None

@@ -93,7 +93,7 @@ except Exception:
 
 ALPHA_THRESHOLD = 20
 
-VERSION = "2.6.1"
+VERSION = "2.6.2"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）
@@ -604,16 +604,40 @@ def process_dx_folder(dx_folder, session=None):
             # 只处理 _cut.png 文件，跳过其他（如 DXxxxx_B.png）
             if not file.lower().endswith("_cut.png"):
                 continue
-            # 跳过黑版/白版专用文件，它们分别由 process_black.py / process_white.py 处理
-            if "_黑" in file or "_白" in file:
-                continue
 
             print(f"\n处理: {file}")
             design_path = os.path.join(rem_bg_folder, file)
-            design_type = classify_design(file)
             base = os.path.splitext(file)[0]
             cut_meta = _get_cut_meta(design_path)
 
+            # 黑版/白版专用 cut（反黑/反白生成，如 HX0003BW_黑BW_cut.png）：
+            # 只用对应色胚衣贴图（黑胚衣用黑贴图、白胚衣用白贴图，T恤同款逻辑）；
+            # 其余颜色（英文色）由通用 cut 贴默认图。
+            spec_color = None
+            if "_黑" in file:
+                spec_color = "黑"
+            elif "_白" in file:
+                spec_color = "白"
+            if spec_color:
+                stem_base = file[:-len("_cut.png")]  # 如 HX0003BW_黑BW
+                suffix = stem_base[len(dx_name)+1:] if stem_base.startswith(dx_name + "_") else stem_base
+                for ch in ("黑", "白"):
+                    if suffix.startswith(ch):
+                        suffix = suffix[1:]
+                        break
+                side, _ver = config.parse_side_suffix(suffix)
+                if side in ("BW", "WB"):
+                    print(f"  → 生成 W/B 面 {spec_color} 专用平铺图（用 {spec_color} 版 cut）...")
+                    _run("W", spec_color, False, "bw")
+                    _run("B", spec_color, False, "w")
+                elif side in ("W", "B"):
+                    print(f"  → 生成 {side} 面 {spec_color} 专用平铺图（用 {spec_color} 版 cut）...")
+                    _run(side, spec_color, False, "w")
+                else:
+                    print(f"  ⚠️ 跳过无法识别的专用 cut: {file}")
+                continue
+
+            design_type = classify_design(file)
             # 如果存在对应的黑版专用文件，则通用图不再用于黑T
             black_file = black_counterpart(file, dx_name)
             has_black = black_file and os.path.exists(os.path.join(rem_bg_folder, black_file))

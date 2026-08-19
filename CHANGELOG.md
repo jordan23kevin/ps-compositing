@@ -1,5 +1,15 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.6.2 — 2026-08-19（反黑/反白专用 cut 贴图：黑胚衣用黑贴图、白胚衣用白贴图、其他色用默认）
+
+- **wb_sticker_ps.py** `process_dx_folder`：不再跳过 `_黑`/`_白` 专用 cut（反黑/反白生成，如 `HX0003BW_黑BW_cut.png`），改为用专用图贴对应色：
+  - `_黑` cut → 黑胚衣平铺图（W/B 面，正面用 bw 五参、背面用顶层）；`_白` cut → 白胚衣平铺图。
+  - 通用 cut 的黑/白输出被专用 cut 覆盖（has_black/has_white 已有逻辑）；**英文色始终用通用 cut 默认图**。
+  - 支持版本号后缀（黑BW2 等）。
+- **check_rem.py v2.6.4**（联动）：`_run_one_sticker` 平铺流程——**卫衣（hoodie）跳过 process_black.py / process_white.py**（那俩是 T恤 老胚衣 `D:\Semems\1胚衣` 专用，卫衣跑会用错胚衣），卫衣反黑/反白专用 cut 全部由 ps_sticker_one 统一按素材库五参处理。
+- 验证（HX0003BW 模拟反黑+反白）：通用 cut 出 8 英文色 ×W/B；`_黑BW_cut` → `W黑T/B黑T`；`_白BW_cut` → `W白T/B白T`；黑白不再从通用 cut 输出。路由全部正确。
+- ⚠️ 生效：ps_sticker_one 每次新起子进程即生效；check_rem 需重启实例（已随发布重启）。
+
 ## v2.6.1 — 2026-08-19（BW/单面款平铺贴图出全部带五参颜色）
 
 - **wb_sticker_ps.py**：`process_dx_folder` 的 BW/W/B 三个分支颜色遍历从「白/黑」扩展为「素材库该面全部带五参颜色」：

@@ -92,7 +92,7 @@ except Exception:
 
 ALPHA_THRESHOLD = 20
 
-VERSION = "2.5.5"
+VERSION = "2.6.0"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）
@@ -330,6 +330,9 @@ def _apply_manual_top(out: Image.Image, torso_path) -> Image.Image:
     实现「卫衣→印花→帽子」分层（印花在帽子下面、帽子在卫衣上面）。
     遮罩不存在/全透明时原样返回。"""
     mp = Path(torso_path).with_name(Path(torso_path).stem + "_manual.png")
+    if not mp.exists():
+        # 兼容英文色文件夹：胚衣 " B2.jpg"（带前导空格）但用户手动保存 "B2_manual.png"（不带空格）
+        mp = Path(torso_path).with_name(Path(torso_path).stem.strip() + "_manual.png")
     if not mp.exists():
         return out
     mask_rgba = Image.open(mp).convert("RGBA")

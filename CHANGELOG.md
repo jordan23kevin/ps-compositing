@@ -1,5 +1,13 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.6.0 — 2026-08-19（manual 遮罩探测兼容英文色带空格胚衣名 + VERSION 同步）
+
+- **wb_sticker_ps.py**：`_apply_manual_top` 探测 `<胚衣名>_manual.png` 时，先试 `{stem}_manual.png`（与胚衣命名一致），找不到再试 `{stem.strip()}_manual.png`（去前导空格）——英文色文件夹胚衣是 ` B2.jpg`（带前导空格），用户手动保存的遮罩通常是不带空格的 `B2_manual.png`，此前探测 ` B2_manual.png` 永远找不到、遮罩静默不生效。
+- **white_t_mockup/core.py**：同步同一 strip 兼容逻辑（单面款链）。
+- **peiyi_correct.py**（ZCodeProject，胚衣页"导入手动遮罩"）：manual 探测候选扩展为 6 个——素材目录（带/不带空格）+ `_mask_versions/{stem}`（带/不带空格）的 `_manual.png` 与 `.png`；此前英文色 B Melon Orange 等提示"未找到手动遮罩文件，请保存为 B2_manual.png"但文件明明存在（探测的是带空格的 ` B2_manual.png`）。
+- VERSION 由 2.5.5 同步为 2.6.0（此前 CHANGELOG 已到 2.5.9 但 VERSION 未跟上，一并修正）。
+- 验证：`peiyi_correct.import_manual_mask(" B2.jpg")` 真实文件调用 → 找到 `B2_manual.png` 并合并归档 v002 成功（B Melon Orange）。
+
 ## v2.5.9 — 2026-08-19（manual 遮罩按 alpha 通道分层：兼容「黑=帽子」或「白=帽子」画法）
 
 - **wb_sticker_ps.py**：`_apply_manual_top` 改为按 `<胚衣名>_manual.png` 的 **alpha 通道**判定前景/帽子（不透明区=帽子，透明区=背景），不再固定按「黑=帽子」反色。这样同时兼容：

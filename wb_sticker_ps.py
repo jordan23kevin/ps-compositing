@@ -287,6 +287,10 @@ class StickerSession:
         canvas.paste(rotated, (px, py), rotated)
         out = Image.alpha_composite(torso, canvas)
 
+        # 手动 PS 遮罩分层（卫衣帽子等）：<胚衣名>_manual.png（黑=前景/帽子、白=背景）
+        # → 反色后用胚衣原图把帽子像素盖到最顶层（卫衣→印花→帽子，印花在帽子下面）
+        out = _apply_manual_top(out, torso_path)
+
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         if os.path.exists(output_path):
             try:
@@ -315,6 +319,27 @@ class StickerSession:
     def close(self):
         # 纯软件实现，无需关闭 Photoshop
         pass
+
+
+def _apply_manual_top(out: Image.Image, torso_path) -> Image.Image:
+    """手动 PS 遮罩分层（卫衣帽子等）：<胚衣名>_manual.png（用户约定「黑=前景/帽子、
+    白=背景」）→ 反色后把胚衣原图（torso）在帽子区的像素覆盖到 out 最顶层，
+    实现「卫衣→印花→帽子」分层（印花在帽子下面、帽子在卫衣上面）。
+    遮罩不存在/全黑时原样返回。"""
+    from PIL import ImageOps
+    mp = Path(torso_path).with_name(Path(torso_path).stem + "_manual.png")
+    if not mp.exists():
+        return out
+    mask = Image.open(mp).convert("L")
+    if mask.size != out.size:
+        mask = mask.resize(out.size, Image.LANCZOS)
+    mask = ImageOps.invert(mask)  # 黑=前景 → 白=前景
+    if not mask.getbbox():
+        return out
+    torso = Image.open(torso_path).convert("RGBA")
+    if torso.size != out.size:
+        torso = torso.resize(out.size, Image.LANCZOS)
+    return Image.composite(torso, out, mask)
 
 
 def classify_design(filename):

@@ -1,5 +1,11 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.5.8 — 2026-08-19（place_design 支持手动 PS 遮罩分层：卫衣帽子盖住印花）
+
+- **wb_sticker_ps.py**：`place_design` 合成输出后新增 `_apply_manual_top`——自动探测胚衣同目录 `<胚衣名>_manual.png`（用户 PS 手动导入，约定**黑=前景/帽子、白=背景**），反色后用胚衣原图把帽子像素覆盖到成品最顶层，实现「卫衣→印花→帽子」分层（印花在帽子下面、帽子在卫衣上面）。与 white_t_mockup（单面款链）的 manual 支持对齐。
+- 背景：上一轮（v2.5.7）只修了 white_t_mockup（单面款链），而 BW 款走 ps 链（place_design 纯 PIL）——用户实测「还是没盖住」。本次补齐 ps 链。
+- 验证：重跑 `ps_sticker_one.py HX0003BW` → `HX0003BW_B黑T.jpg` 帽子区（黑B2_manual 黑区）300 样本 vs 胚衣原图 像素差 0.1，帽子中心点字节级一致。
+
 ## v2.5.7 — 2026-08-19（卫衣 BW 款贴图修复：rotation=0 误判 + HX 前缀元数据）
 
 - **wb_sticker_ps.py**：`_select_meta`（bw 第二套五参）此前对所有 key 判「为 0 即未填写」→ `rotation=0`（不旋转，合法）被误判抛错，导致卫衣 BW 款（白W2/黑W2 的 bw 块 rotation=0）贴图失败（用户报 `HX0003BW: 平铺图贴图执行失败`）。修复：**仅 width/height 强制 >0**，rotation/highest_y/center_x 允许 0。

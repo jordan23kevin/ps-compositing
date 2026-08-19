@@ -1,5 +1,11 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.5.5 — 2026-08-19（config.py 品类根按 SEMEMS_ROOT 解析，支持卫衣）
+
+- **config.py**
+  - `SOURCE_BASE` / `MATERIAL_BASE` 由写死 `D:\Semems WB\...` 改为读 `SEMEMS_ROOT` 环境变量（check_rem 启动时注入：T恤 `D:\Semems WB`、卫衣 `D:\Semems Hoodie`；缺省 T恤）。卫衣平铺/BW 款贴图不再串用 T恤 项目根与素材根。
+  - 与 `wb_meta.py` 既有 `SEMEMS_ROOT` 约定一致，子进程自动继承环境变量。
+
 ## v2.5.4 — 2026-07-15（五参 contain 缩放 + BW 双面款 bw② 修正）
 
 - **wb_sticker_ps.py v2.5.4**

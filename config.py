@@ -2,14 +2,18 @@
 import os
 import re
 
+# 品类根（check_rem 启动时注入 SEMEMS_ROOT；缺省 T恤）。
+# 卫衣时自动切到 D:\Semems Hoodie，项目/素材根随之走卫衣，不再串用 T恤 数据。
+SEMEMS_ROOT = os.environ.get("SEMEMS_ROOT", r"D:\Semems WB")
+
 # 胚衣路径
 BASE_TORSO = r"D:\Semems\1胚衣"
-SOURCE_BASE = r"D:\Semems WB\02_PROJECTS"
+SOURCE_BASE = os.path.join(SEMEMS_ROOT, "02_PROJECTS")
 
 # 平铺胚衣素材库（与 03_MATERIAL 一致；五参见各胚衣同名 .meta.json）
 # 经像素比对，以下胚衣与旧 1胚衣 的 白正2/黑正2/白背2/黑背2 为同一件衣服
 # （JPEG 重编码差 <1/255），切换底图不会改变成品外观，仅修正定位。
-MATERIAL_BASE = r"D:\Semems WB\03_MATERIAL"
+MATERIAL_BASE = os.path.join(SEMEMS_ROOT, "03_MATERIAL")
 
 # 平铺胚衣标准款（工作记忆确认：白W11/黑W11 正、白B12/黑B7 背）
 # 每个胚衣后附同名 .meta.json 五参（width/height/rotation/highest_y/center_x）

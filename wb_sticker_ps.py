@@ -287,8 +287,9 @@ class StickerSession:
         canvas.paste(rotated, (px, py), rotated)
         out = Image.alpha_composite(torso, canvas)
 
-        # 手动 PS 遮罩分层（卫衣帽子等）：<胚衣名>_manual.png（黑=前景/帽子、白=背景）
-        # → 反色后用胚衣原图把帽子像素盖到最顶层（卫衣→印花→帽子，印花在帽子下面）
+        # 手动 PS 遮罩分层（卫衣帽子等）：<胚衣名>_manual.png（不透明区=帽子/前景，
+        # 透明区=背景；兼容「黑=帽子」或「白=帽子」两种画法）。
+        # 用 alpha 通道把胚衣原图在帽子区盖到最顶层（卫衣→印花→帽子，印花在帽子下面）
         out = _apply_manual_top(out, torso_path)
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -322,24 +323,25 @@ class StickerSession:
 
 
 def _apply_manual_top(out: Image.Image, torso_path) -> Image.Image:
-    """手动 PS 遮罩分层（卫衣帽子等）：<胚衣名>_manual.png（用户约定「黑=前景/帽子、
-    白=背景」）→ 反色后把胚衣原图（torso）在帽子区的像素覆盖到 out 最顶层，
+    """手动 PS 遮罩分层（卫衣帽子等）：<胚衣名>_manual.png。
+    约定：不透明区域 = 前景/帽子（需盖住印花），透明区域 = 背景（保持印花）。
+    同时兼容用户用「黑=帽子」或「白=帽子」两种画法，统一按 alpha 通道判定前景。
+    用 alpha 通道作为 mask 把胚衣原图（torso）在帽子区覆盖到 out 最顶层，
     实现「卫衣→印花→帽子」分层（印花在帽子下面、帽子在卫衣上面）。
-    遮罩不存在/全黑时原样返回。"""
-    from PIL import ImageOps
+    遮罩不存在/全透明时原样返回。"""
     mp = Path(torso_path).with_name(Path(torso_path).stem + "_manual.png")
     if not mp.exists():
         return out
-    mask = Image.open(mp).convert("L")
-    if mask.size != out.size:
-        mask = mask.resize(out.size, Image.LANCZOS)
-    mask = ImageOps.invert(mask)  # 黑=前景 → 白=前景
-    if not mask.getbbox():
+    mask_rgba = Image.open(mp).convert("RGBA")
+    alpha = mask_rgba.split()[3]
+    if not alpha.getbbox():
         return out
     torso = Image.open(torso_path).convert("RGBA")
     if torso.size != out.size:
         torso = torso.resize(out.size, Image.LANCZOS)
-    return Image.composite(torso, out, mask)
+    if alpha.size != out.size:
+        alpha = alpha.resize(out.size, Image.LANCZOS)
+    return Image.composite(torso, out, alpha)
 
 
 def classify_design(filename):

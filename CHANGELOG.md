@@ -1,10 +1,19 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.5.9 — 2026-08-19（manual 遮罩按 alpha 通道分层：兼容「黑=帽子」或「白=帽子」画法）
+
+- **wb_sticker_ps.py**：`_apply_manual_top` 改为按 `<胚衣名>_manual.png` 的 **alpha 通道**判定前景/帽子（不透明区=帽子，透明区=背景），不再固定按「黑=帽子」反色。这样同时兼容：
+  - `白B2_manual.png` 白帽子 + 透明背景；
+  - `黑B2_manual.png` 黑帽子 + 透明背景。
+  之前 v2.5.8 无条件反色，导致「白=帽子」的成品完全反向（背景被胚衣盖住、帽子仍显示印花）。
+- **white_t_mockup/core.py**：同步把 manual 处理从「无条件反色」改为「取 alpha 通道传给 `_paste_drawstring_top`」，单面款链也兼容两种画法。
+- 验证：重跑 `ps_sticker_one.py HX0003BW` → `HX0003BW_B白T.jpg` 帽子区（白B2_manual 不透明区）300 样本 vs 胚衣原图 像素差 **0.4**，帽子中心点 `(877,486)` 字节级一致；`HX0003BW_B黑T.jpg` 帽子区像素差 0.1，均正确。
+
 ## v2.5.8 — 2026-08-19（place_design 支持手动 PS 遮罩分层：卫衣帽子盖住印花）
 
-- **wb_sticker_ps.py**：`place_design` 合成输出后新增 `_apply_manual_top`——自动探测胚衣同目录 `<胚衣名>_manual.png`（用户 PS 手动导入，约定**黑=前景/帽子、白=背景**），反色后用胚衣原图把帽子像素覆盖到成品最顶层，实现「卫衣→印花→帽子」分层（印花在帽子下面、帽子在卫衣上面）。与 white_t_mockup（单面款链）的 manual 支持对齐。
+- **wb_sticker_ps.py**：`place_design` 合成输出后新增 `_apply_manual_top`——自动探测胚衣同目录 `<胚衣名>_manual.png`（用户 PS 手动导入，约定不透明区=前景/帽子、透明区=背景），用胚衣原图把帽子像素覆盖到成品最顶层，实现「卫衣→印花→帽子」分层（印花在帽子下面、帽子在卫衣上面）。
 - 背景：上一轮（v2.5.7）只修了 white_t_mockup（单面款链），而 BW 款走 ps 链（place_design 纯 PIL）——用户实测「还是没盖住」。本次补齐 ps 链。
-- 验证：重跑 `ps_sticker_one.py HX0003BW` → `HX0003BW_B黑T.jpg` 帽子区（黑B2_manual 黑区）300 样本 vs 胚衣原图 像素差 0.1，帽子中心点字节级一致。
+- 验证：重跑 `ps_sticker_one.py HX0003BW` → `HX0003BW_B黑T.jpg` 帽子区 300 样本 vs 胚衣原图 像素差 0.1，帽子中心点字节级一致。
 
 ## v2.5.7 — 2026-08-19（卫衣 BW 款贴图修复：rotation=0 误判 + HX 前缀元数据）
 

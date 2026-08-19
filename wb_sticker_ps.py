@@ -93,7 +93,7 @@ except Exception:
 
 ALPHA_THRESHOLD = 20
 
-VERSION = "2.6.2"
+VERSION = "2.6.3"
 
 # ---------------------------------------------------------------------------
 # 元数据辅助（读取 _cut.png sidecar，为上传图注册）
@@ -288,6 +288,10 @@ class StickerSession:
         canvas.paste(rotated, (px, py), rotated)
         out = Image.alpha_composite(torso, canvas)
 
+        # 抽绳分层（卫衣）：<胚衣名>_drawstring_mask.png（白=绳子）——自动把原胚衣绳子
+        # 像素盖到最顶层（卫衣→印花→绳子），让绳子压住印花，与 white_t_mockup 链对齐。
+        out = _apply_drawstring_top(out, torso_path)
+
         # 手动 PS 遮罩分层（卫衣帽子等）：<胚衣名>_manual.png（不透明区=帽子/前景，
         # 透明区=背景；兼容「黑=帽子」或「白=帽子」两种画法）。
         # 用 alpha 通道把胚衣原图在帽子区盖到最顶层（卫衣→印花→帽子，印花在帽子下面）
@@ -321,6 +325,25 @@ class StickerSession:
     def close(self):
         # 纯软件实现，无需关闭 Photoshop
         pass
+
+
+def _apply_drawstring_top(out: Image.Image, torso_path) -> Image.Image:
+    """抽绳分层（卫衣）：<胚衣名>_drawstring_mask.png（白=绳子）。
+    把原胚衣真实绳子像素盖到最顶层（卫衣→印花→绳子），让绳子压住印花。
+    与 white_t_mockup 链对齐（ps 链平铺图贴图此前仅自动盖 manual，缺 drawstring 导致
+    "仅本张"与批量走 white_t_mockup 的遮罩效果不一致）。"""
+    dp = Path(torso_path).with_name(Path(torso_path).stem + "_drawstring_mask.png")
+    if not dp.exists():
+        return out
+    mask = Image.open(dp).convert("L")
+    if not mask.getbbox():
+        return out
+    torso = Image.open(torso_path).convert("RGBA")
+    if torso.size != out.size:
+        torso = torso.resize(out.size, Image.LANCZOS)
+    if mask.size != out.size:
+        mask = mask.resize(out.size, Image.LANCZOS)
+    return Image.composite(torso, out, mask)
 
 
 def _apply_manual_top(out: Image.Image, torso_path) -> Image.Image:

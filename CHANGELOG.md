@@ -1,5 +1,13 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.6.3 — 2026-08-19（ps 链 `place_design` 自动套抽绳遮罩，与 white_t_mockup 链对齐）
+
+- **wb_sticker_ps.py**：`StickerSession.place_design` 合成输出后新增 `_apply_drawstring_top`——自动探测胚衣同目录 `<胚衣名>_drawstring_mask.png`（白=绳子），把原胚衣绳子像素盖到最顶层，实现「卫衣→印花→绳子」分层（印花在绳子下面）。
+- 背景：用户报「仅本张重新贴图没用遮罩文件，但批量贴图用了」。`仅本张` 走 ps 链 `place_design`（之前只自动盖 manual、不盖 drawstring）；`批量` 走 white_t_mockup 链 `apply_mockup_transform`（手动 + drawstring 都盖）。现在 ps 链补齐 drawstring，两个入口遮罩行为一致。
+- 顺序：先 drawstring（绳子）再 manual（帽子），后者最顶，与 white_t_mockup 一致。
+- 验证（HX0001W ps_sticker_one 重跑）：`W黑T.jpg` 抽绳区从被印花穿过 → 被胚衣原图覆盖（白色像素比例显著下降）。
+- 生效：ps_sticker_one 子进程即时生效；`_resticker`（check_rem 进程内 StickerSession）需重启 8767。
+
 ## v2.6.2 — 2026-08-19（反黑/反白专用 cut 贴图：黑胚衣用黑贴图、白胚衣用白贴图、其他色用默认）
 
 - **wb_sticker_ps.py** `process_dx_folder`：不再跳过 `_黑`/`_白` 专用 cut（反黑/反白生成，如 `HX0003BW_黑BW_cut.png`），改为用专用图贴对应色：

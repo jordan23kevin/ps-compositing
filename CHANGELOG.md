@@ -1,5 +1,10 @@
 # CHANGELOG — 贴图流水线（纯软件）
 
+## v2.5.6 — 2026-08-19（FLAT_TORSO 按品类：卫衣用各色 2 号平铺胚衣）
+
+- **config.py**
+  - `FLAT_TORSO` 按品类区分：T恤(wb)=白W11/黑W11/白B12/黑B7；卫衣(hoodie)=各颜色文件夹「2 号图」白W2/黑W2/白B2/黑B2（用户确认 2 号图即平铺胚衣）。平铺/BW 款贴图底图随 `SEMEMS_ROOT` 自动切换，不再用 T恤 平铺胚衣贴卫衣款。
+
 ## v2.5.5 — 2026-08-19（config.py 品类根按 SEMEMS_ROOT 解析，支持卫衣）
 
 - **config.py**

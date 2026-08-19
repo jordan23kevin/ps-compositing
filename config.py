@@ -17,12 +17,21 @@ MATERIAL_BASE = os.path.join(SEMEMS_ROOT, "03_MATERIAL")
 
 # 平铺胚衣标准款（工作记忆确认：白W11/黑W11 正、白B12/黑B7 背）
 # 每个胚衣后附同名 .meta.json 五参（width/height/rotation/highest_y/center_x）
-FLAT_TORSO = {
+# 按品类区分：T恤(wb)=白W11/黑W11/白B12/黑B7；卫衣(hoodie)=各颜色文件夹「2 号图」
+# 白W2/黑W2/白B2/黑B2（用户 2026-08-19 确认 2 号图即平铺胚衣）。
+_FLAT_TORSO_WB = {
     "W白": ("W白/白W11.jpg", "W白/白W11.meta.json"),
     "W黑": ("W黑/黑W11.jpg", "W黑/黑W11.meta.json"),
     "B白": ("B白/白B12.jpg", "B白/白B12.meta.json"),
     "B黑": ("B黑/黑B7.jpg",  "B黑/黑B7.meta.json"),
 }
+_FLAT_TORSO_HOODIE = {
+    "W白": ("W白/白W2.jpg", "W白/白W2.meta.json"),
+    "W黑": ("W黑/黑W2.jpg", "W黑/黑W2.meta.json"),
+    "B白": ("B白/白B2.jpg", "B白/白B2.meta.json"),
+    "B黑": ("B黑/黑B2.jpg",  "B黑/黑B2.meta.json"),
+}
+FLAT_TORSO = _FLAT_TORSO_HOODIE if "Hoodie" in SEMEMS_ROOT else _FLAT_TORSO_WB
 
 # 图像参数
 ALPHA_THRESHOLD = 20

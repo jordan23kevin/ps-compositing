@@ -569,13 +569,16 @@ def _flat_torso_paths(side: str, color: str):
     raise ValueError(f"{cat.name} 缺 2 号平铺胚衣(带meta)")
 
 
-def _flat_colors(side: str, require_bw: bool = False) -> list[str]:
+def _flat_colors(side: str, require_bw: bool = False, only_color: str | None = None) -> list[str]:
     """素材库该面全部可用颜色（白/黑 + 中文色）。
 
     require_bw=True 时只留 meta 含 "bw" 块的颜色（BW 款正面用第二组五参）。
+    only_color 非 None（"黑"/"白"，反黑/反白专用）时只返回该色，其余颜色不重贴。
     无 2 号平铺胚衣 / meta 缺失 / 缺 bw 块的颜色自动跳过（不中断整款）。"""
     out = []
     for color in w_mockup_extra._list_embryo_colors(side):
+        if only_color and color != only_color:
+            continue
         try:
             _, mp = _flat_torso_paths(side, color)
         except Exception:
@@ -588,8 +591,9 @@ def _flat_colors(side: str, require_bw: bool = False) -> list[str]:
     return out
 
 
-def process_dx_folder(dx_folder, session=None):
-    """处理单个 DX 文件夹，返回耗时（秒）。session 为 None 时内部创建。"""
+def process_dx_folder(dx_folder, session=None, only_color=None):
+    """处理单个 DX 文件夹，返回耗时（秒）。session 为 None 时内部创建。
+    only_color 非 None（"黑"/"白"，反黑/反白专用）时只贴该颜色，其余颜色不重贴。"""
     dx_name = os.path.basename(dx_folder)
     rem_bg_folder = os.path.join(dx_folder, "02_REM_BG")
     upload_folder = os.path.join(dx_folder, "03_UPLOAD")
@@ -680,8 +684,8 @@ def process_dx_folder(dx_folder, session=None):
                 # 颜色=素材库该面全部带五参颜色（黑白+中文色）；正面需 bw 块，背面用顶层。
                 dx_is_bw = dx_name.endswith("BW") or dx_name.endswith("WB")
                 is_split_w = dx_is_bw and "_W" in base
-                w_colors = _flat_colors("W", require_bw=True)
-                b_colors = _flat_colors("B")
+                w_colors = _flat_colors("W", require_bw=True, only_color=only_color)
+                b_colors = _flat_colors("B", only_color=only_color)
                 for color in w_colors:
                     if (color == "白" and has_white) or (color == "黑" and has_black):
                         continue  # 黑白有专用 cut，通用图不再输出
@@ -697,14 +701,14 @@ def process_dx_folder(dx_folder, session=None):
 
             elif design_type == "W":
                 # ===== W 类型：正图五参定位（单面款，用顶层第一组）=====
-                for color in _flat_colors("W"):
+                for color in _flat_colors("W", only_color=only_color):
                     if (color == "白" and has_white) or (color == "黑" and has_black):
                         continue
                     _run("W", color, False, "w")
 
             elif design_type == "B":
                 # ===== B 类型：背图五参定位（背面只一组）=====
-                for color in _flat_colors("B"):
+                for color in _flat_colors("B", only_color=only_color):
                     if (color == "白" and has_white) or (color == "黑" and has_black):
                         continue
                     _run("B", color, False, "w")

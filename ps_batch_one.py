@@ -20,14 +20,19 @@ from config import SOURCE_BASE
 
 if __name__ == "__main__":
     dx = sys.argv[1]
+    only_color = None
+    if "--only-color" in sys.argv:
+        i = sys.argv.index("--only-color")
+        if i + 1 < len(sys.argv):
+            only_color = sys.argv[i + 1]
     if not os.path.isdir(os.path.join(SOURCE_BASE, dx)):
         print(f"❌ {dx} 不存在")
         sys.exit(1)
     t0 = time.time()
-    print(f"\n=== BW合成: {dx} ===")
+    print(f"\n=== BW合成: {dx} {'(仅'+only_color+')' if only_color else ''} ===")
 
     # BW 合成已改为纯 PIL，无需连接 Photoshop
-    process_dx(None, dx)
+    process_dx(None, dx, only_color=only_color)
 
     dt = time.time() - t0
     print(f"\n✓ {dx} BW合成完成 耗时 {dt:.1f}秒")

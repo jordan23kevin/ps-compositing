@@ -183,8 +183,9 @@ def compose_bw_pil(front_path, back_path, out_path, shirt_color="white",
     return out_path
 
 
-def process_dx(ps, dx_folder):
-    """处理单个 DX 的 BW 合成（白T + 黑T）。ps 参数为兼容旧调用保留，纯软件下未使用。"""
+def process_dx(ps, dx_folder, only_color=None):
+    """处理单个 DX 的 BW 合成（白T + 黑T）。ps 参数为兼容旧调用保留，纯软件下未使用。
+    only_color 非 None（"黑"/"白"，反黑/反白专用）时只合成该色（反黑只做黑T、反白只做白T）。"""
     upload = os.path.join(BASE, dx_folder, "03_UPLOAD")
 
     # 单面款（02_REM_BG 只有 B 或只有 W）不该合成 BW 平铺图：
@@ -202,6 +203,9 @@ def process_dx(ps, dx_folder):
         ("白T", "白", wb_naming.bw_name(dx_folder, "白")),
         ("黑T", "黑", wb_naming.bw_name(dx_folder, "黑")),
     ]
+    if only_color:
+        # 反黑/反白：只合成对应色（反黑→黑T，反白→白T）
+        colors = [c for c in colors if c[1] == only_color]
 
     results = []
     for color, action_name, output_name in colors:

@@ -16,12 +16,17 @@ from config import SOURCE_BASE
 
 if __name__ == "__main__":
     dx = sys.argv[1]
+    only_color = None
+    if "--only-color" in sys.argv:
+        i = sys.argv.index("--only-color")
+        if i + 1 < len(sys.argv):
+            only_color = sys.argv[i + 1]
     dx_folder = os.path.join(SOURCE_BASE, dx)
     if not os.path.isdir(dx_folder):
         print(f"❌ {dx_folder} 不存在")
         sys.exit(1)
     t0 = time.time()
-    print(f"\n=== PS贴图: {dx} ===")
-    process_dx_folder(dx_folder)
+    print(f"\n=== PS贴图: {dx} {'(仅'+only_color+')' if only_color else ''} ===")
+    process_dx_folder(dx_folder, only_color=only_color)
     dt = time.time() - t0
     print(f"✓ {dx} 完成，耗时 {dt:.1f}秒")
